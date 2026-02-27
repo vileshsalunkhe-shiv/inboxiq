@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="24E214" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="EmailEntity" representedClassName="EmailEntity" syncable="YES">
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="gmailId" optional="NO" attributeType="String"/>
+        <attribute name="subject" optional="NO" attributeType="String"/>
+        <attribute name="sender" optional="NO" attributeType="String"/>
+        <attribute name="snippet" optional="NO" attributeType="String"/>
+        <attribute name="receivedAt" optional="NO" attributeType="Date"/>
+        <attribute name="syncedAt" optional="NO" attributeType="Date"/>
+        <attribute name="isUnread" optional="NO" attributeType="Boolean"/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CategoryEntity"/>
+    </entity>
+    <entity name="CategoryEntity" representedClassName="CategoryEntity" syncable="YES">
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" optional="NO" attributeType="String"/>
+        <attribute name="color" optional="NO" attributeType="String"/>
+        <attribute name="icon" optional="NO" attributeType="String"/>
+        <attribute name="count" optional="NO" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="emails" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="EmailEntity" inverseName="category" inverseEntity="EmailEntity"/>
+    </entity>
+    <entity name="UserEntity" representedClassName="UserEntity" syncable="YES">
+        <attribute name="id" optional="NO" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="email" optional="YES" attributeType="String"/>
+        <attribute name="lastSyncDate" optional="YES" attributeType="Date"/>
+        <relationship name="emails" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="EmailEntity"/>
+    </entity>
+</model>

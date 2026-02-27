@@ -1,0 +1,51 @@
+"""Gmail API integration."""
+
+from __future__ import annotations
+
+import base64
+from typing import Any
+
+import asyncio
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+from app.config import settings
+
+
+class GmailService:
+    """Provides Gmail API operations."""
+
+    async def build_client(self, access_token: str) -> Any:
+        """Build a Gmail API client from access token."""
+        creds = Credentials(token=access_token)
+        return await asyncio.to_thread(build, "gmail", "v1", credentials=creds)
+
+    async def list_messages(self, access_token: str, query: str | None = None, page_token: str | None = None) -> dict:
+        """List Gmail messages with optional search query."""
+        service = await self.build_client(access_token)
+        request = service.users().messages().list(userId=settings.gmail_api_user, q=query, pageToken=page_token)
+        return await asyncio.to_thread(request.execute)
+
+    async def get_message(self, access_token: str, message_id: str) -> dict:
+        """Fetch a Gmail message by ID."""
+        service = await self.build_client(access_token)
+        request = service.users().messages().get(userId=settings.gmail_api_user, id=message_id, format="metadata")
+        return await asyncio.to_thread(request.execute)
+
+    async def get_history(self, access_token: str, start_history_id: str, page_token: str | None = None) -> dict:
+        """Retrieve history changes since historyId."""
+        service = await self.build_client(access_token)
+        request = service.users().history().list(
+            userId=settings.gmail_api_user,
+            startHistoryId=start_history_id,
+            pageToken=page_token,
+            historyTypes=["messageAdded"],
+        )
+        return await asyncio.to_thread(request.execute)
+
+    async def send_message(self, access_token: str, raw_message: bytes) -> dict:
+        """Send an email via Gmail API."""
+        service = await self.build_client(access_token)
+        body = {"raw": base64.urlsafe_b64encode(raw_message).decode()}
+        request = service.users().messages().send(userId=settings.gmail_api_user, body=body)
+        return await asyncio.to_thread(request.execute)

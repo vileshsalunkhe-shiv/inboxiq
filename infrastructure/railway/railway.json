@@ -1,0 +1,66 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "infrastructure/railway/backend.Dockerfile"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "sleepApplication": false
+  },
+  "services": {
+    "backend": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "infrastructure/railway/backend.Dockerfile",
+        "watchPatterns": ["backend/**"]
+      },
+      "deploy": {
+        "numReplicas": 1,
+        "restartPolicyType": "ON_FAILURE",
+        "healthcheckPath": "/health",
+        "healthcheckTimeout": 100
+      },
+      "environment": {
+        "PORT": "8000",
+        "ENVIRONMENT": "production",
+        "DATABASE_URL": "${{PostgreSQL.DATABASE_URL}}",
+        "REDIS_URL": "${{Redis.REDIS_URL}}",
+        "JWT_SECRET_KEY": "${{JWT_SECRET_KEY}}",
+        "ENCRYPTION_KEY": "${{ENCRYPTION_KEY}}",
+        "GOOGLE_CLIENT_ID": "${{GOOGLE_CLIENT_ID}}",
+        "GOOGLE_CLIENT_SECRET": "${{GOOGLE_CLIENT_SECRET}}",
+        "GOOGLE_REDIRECT_URI": "${{GOOGLE_REDIRECT_URI}}",
+        "ANTHROPIC_API_KEY": "${{ANTHROPIC_API_KEY}}",
+        "SENTRY_DSN": "${{SENTRY_DSN}}",
+        "CORS_ORIGINS": "${{CORS_ORIGINS}}",
+        "LOG_LEVEL": "INFO"
+      }
+    },
+    "worker": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "infrastructure/railway/worker.Dockerfile",
+        "watchPatterns": ["backend/worker/**", "backend/app/services/**"]
+      },
+      "deploy": {
+        "numReplicas": 1,
+        "restartPolicyType": "ALWAYS"
+      },
+      "environment": {
+        "ENVIRONMENT": "production",
+        "DATABASE_URL": "${{PostgreSQL.DATABASE_URL}}",
+        "REDIS_URL": "${{Redis.REDIS_URL}}",
+        "ANTHROPIC_API_KEY": "${{ANTHROPIC_API_KEY}}",
+        "SENTRY_DSN": "${{SENTRY_DSN}}",
+        "LOG_LEVEL": "INFO",
+        "WORKER_CONCURRENCY": "5",
+        "WORKER_BATCH_SIZE": "10"
+      }
+    }
+  }
+}

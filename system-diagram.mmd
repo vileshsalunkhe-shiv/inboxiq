@@ -1,0 +1,184 @@
+# InboxIQ System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "iOS App Layer"
+        App[iPhone App<br/>Swift/SwiftUI]
+        LocalDB[(Core Data<br/>Local Cache)]
+        KeyChain[Keychain<br/>Secure Storage]
+        
+        App --> LocalDB
+        App --> KeyChain
+    end
+    
+    subgraph "API Gateway"
+        LB[Load Balancer<br/>Railway]
+        RateLimit[Rate Limiter<br/>Redis]
+        
+        LB --> RateLimit
+    end
+    
+    subgraph "Application Layer"
+        API[FastAPI<br/>Backend]
+        Auth[Auth Service<br/>JWT/OAuth]
+        Sync[Sync Engine<br/>Delta Updates]
+        AI[AI Service<br/>Categorization]
+        
+        API --> Auth
+        API --> Sync
+        API --> AI
+    end
+    
+    subgraph "External Services"
+        Gmail[Gmail API<br/>Email Source]
+        Claude[Claude AI<br/>Anthropic]
+        n8n[n8n Workflows<br/>Orchestration]
+        
+        Sync --> Gmail
+        AI --> Claude
+        AI --> n8n
+        n8n --> Claude
+    end
+    
+    subgraph "Data Layer"
+        PG[(PostgreSQL<br/>Primary DB)]
+        Redis[(Redis<br/>Cache/Queue)]
+        
+        API --> PG
+        API --> Redis
+        RateLimit --> Redis
+        AI --> Redis
+    end
+    
+    subgraph "Infrastructure"
+        Railway[Railway.app<br/>Hosting]
+        Sentry[Sentry<br/>Error Tracking]
+        CloudFlare[Cloudflare<br/>CDN/Security]
+        
+        Railway --> LB
+        API --> Sentry
+        CloudFlare --> Railway
+    end
+    
+    %% Connections
+    App -.->|HTTPS| CloudFlare
+    CloudFlare --> LB
+    RateLimit --> API
+    
+    %% Styling
+    classDef ios fill:#007AFF,stroke:#333,stroke-width:2px,color:#fff
+    classDef backend fill:#00D26A,stroke:#333,stroke-width:2px,color:#fff
+    classDef external fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#fff
+    classDef data fill:#4ECDC4,stroke:#333,stroke-width:2px,color:#fff
+    classDef infra fill:#95A5A6,stroke:#333,stroke-width:2px,color:#fff
+    
+    class App,LocalDB,KeyChain ios
+    class API,Auth,Sync,AI,LB,RateLimit backend
+    class Gmail,Claude,n8n external
+    class PG,Redis data
+    class Railway,Sentry,CloudFlare infra
+```
+
+## Email Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as iOS App
+    participant API as FastAPI
+    participant Gmail as Gmail API
+    participant Queue as Redis Queue
+    participant n8n as n8n Workflow
+    participant Claude as Claude AI
+    participant DB as PostgreSQL
+    
+    User->>App: Open App
+    App->>App: Check Local Cache
+    App->>API: Request Sync
+    API->>API: Validate JWT
+    
+    API->>Gmail: Fetch New Emails
+    Gmail-->>API: Email Data
+    
+    API->>DB: Store Email Metadata
+    API->>Queue: Queue for AI Processing
+    API-->>App: Return New Emails
+    
+    App->>App: Update Local Cache
+    App->>User: Display Emails
+    
+    Note over Queue,Claude: Async Processing
+    
+    n8n->>Queue: Poll for Jobs
+    Queue-->>n8n: Email to Process
+    n8n->>Claude: Categorize Email
+    Claude-->>n8n: Category + Confidence
+    n8n->>DB: Update Category
+    n8n->>API: Notify Completion
+    
+    API-->>App: Push Update (WebSocket)
+    App->>User: Show Category
+```
+
+## Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as iOS App
+    participant API as Backend API
+    participant Google as Google OAuth
+    participant DB as Database
+    
+    User->>App: Tap "Sign in with Gmail"
+    App->>API: Request Auth URL
+    API->>API: Generate State Token
+    API-->>App: OAuth URL + State
+    
+    App->>Google: Open OAuth Flow
+    User->>Google: Authorize Access
+    Google-->>App: Auth Code + State
+    
+    App->>API: Exchange Code
+    API->>API: Verify State
+    API->>Google: Exchange for Tokens
+    Google-->>API: Access + Refresh Tokens
+    
+    API->>DB: Store Encrypted Refresh Token
+    API->>API: Generate JWT
+    API-->>App: JWT + Refresh Token
+    
+    App->>App: Store in Keychain
+    App->>User: Show Inbox
+```
+
+## Cost Optimization Strategy
+
+```mermaid
+pie title Monthly Cost Breakdown ($240 Total)
+    "Railway Hosting" : 40
+    "PostgreSQL" : 20
+    "Redis Cache" : 10
+    "Claude API" : 150
+    "n8n Workflows" : 20
+```
+
+## Development Timeline
+
+```mermaid
+gantt
+    title InboxIQ Development Schedule
+    dateFormat  YYYY-MM-DD
+    section Phase 1
+    Backend Setup           :a1, 2024-01-01, 7d
+    Gmail Integration       :a2, after a1, 7d
+    section Phase 2
+    iOS App Foundation      :b1, after a2, 7d
+    Core Features          :b2, after b1, 7d
+    section Phase 3
+    AI Integration         :c1, after b2, 7d
+    Rules Engine           :c2, after c1, 7d
+    section Phase 4
+    Polish & Testing       :d1, after c2, 7d
+    App Store Submission   :d2, after d1, 7d
+```

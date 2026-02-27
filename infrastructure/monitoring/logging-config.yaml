@@ -1,0 +1,197 @@
+# InboxIQ Structured Logging Configuration
+# Uses Python's logging.config with structlog for JSON output
+
+version: 1
+disable_existing_loggers: false
+
+# Formatters
+formatters:
+  # JSON formatter for production (machine-readable)
+  json:
+    (): pythonjsonlogger.jsonlogger.JsonFormatter
+    format: "%(timestamp)s %(level)s %(name)s %(message)s %(pathname)s %(lineno)d %(funcName)s"
+    rename_fields:
+      timestamp: "@timestamp"
+      level: "log.level"
+      name: "logger.name"
+      pathname: "log.origin.file.name"
+      lineno: "log.origin.file.line"
+      funcName: "log.origin.function"
+  
+  # Human-readable formatter for development
+  console:
+    format: "[%(asctime)s] %(levelname)-8s [%(name)s:%(lineno)d] %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+  
+  # Detailed formatter with colors (development only)
+  detailed:
+    (): colorlog.ColoredFormatter
+    format: "%(log_color)s%(asctime)s [%(levelname)-8s]%(reset)s %(blue)s%(name)-30s%(reset)s %(message)s %(dim)s(%(filename)s:%(lineno)d)%(reset)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+    log_colors:
+      DEBUG: cyan
+      INFO: green
+      WARNING: yellow
+      ERROR: red
+      CRITICAL: bold_red
+
+# Handlers
+handlers:
+  # Console handler (always enabled)
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: detailed  # Use 'json' for production
+    stream: ext://sys.stdout
+  
+  # File handler for all logs
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: json
+    filename: logs/inboxiq.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 10
+    encoding: utf8
+  
+  # Separate file for errors
+  error_file:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: json
+    filename: logs/inboxiq-errors.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 10
+    encoding: utf8
+  
+  # Performance/metrics handler
+  metrics:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: json
+    filename: logs/inboxiq-metrics.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    encoding: utf8
+
+# Loggers
+loggers:
+  # Root logger
+  root:
+    level: INFO
+    handlers: [console, file, error_file]
+  
+  # InboxIQ application logger
+  inboxiq:
+    level: DEBUG
+    handlers: [console, file, error_file]
+    propagate: false
+  
+  # API request/response logging
+  inboxiq.api:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  # Gmail sync logging
+  inboxiq.sync:
+    level: DEBUG
+    handlers: [console, file]
+    propagate: false
+  
+  # AI categorization logging
+  inboxiq.ai:
+    level: INFO
+    handlers: [console, file, metrics]
+    propagate: false
+  
+  # Worker logging
+  inboxiq.worker:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  # Database logging
+  inboxiq.database:
+    level: WARNING
+    handlers: [console, file]
+    propagate: false
+  
+  # Security/auth logging
+  inboxiq.auth:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  # Third-party libraries (reduce noise)
+  uvicorn:
+    level: INFO
+    handlers: [console]
+    propagate: false
+  
+  uvicorn.access:
+    level: WARNING  # Reduce access log noise
+    handlers: [console]
+    propagate: false
+  
+  sqlalchemy:
+    level: WARNING  # Only show warnings/errors
+    handlers: [console, file]
+    propagate: false
+  
+  alembic:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  httpx:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+  
+  anthropic:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+# Environment-specific overrides
+# These can be loaded programmatically based on ENVIRONMENT variable
+
+# Development environment
+development:
+  handlers:
+    console:
+      formatter: detailed  # Colorful, human-readable
+  loggers:
+    root:
+      level: DEBUG
+    inboxiq:
+      level: DEBUG
+    uvicorn.access:
+      level: INFO
+
+# Staging environment
+staging:
+  handlers:
+    console:
+      formatter: json
+  loggers:
+    root:
+      level: INFO
+    inboxiq:
+      level: DEBUG
+
+# Production environment
+production:
+  handlers:
+    console:
+      formatter: json
+  loggers:
+    root:
+      level: INFO
+    inboxiq:
+      level: INFO
+    inboxiq.database:
+      level: ERROR  # Only errors in production
+    uvicorn.access:
+      level: ERROR  # Disable access logs in production
