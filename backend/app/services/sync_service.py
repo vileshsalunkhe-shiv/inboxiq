@@ -28,10 +28,10 @@ class SyncService:
     async def sync_user(self, user_id: str) -> int:
         """Sync new emails for a user and queue AI processing."""
         user = await self._get_user(user_id)
-        if not user.google_tokens_encrypted:
+        if not user.google_refresh_token:
             raise ValueError("User has no Google tokens")
 
-        access_payload = await self.auth.refresh_google_access_token(user.google_tokens_encrypted)
+        access_payload = await self.auth.refresh_google_access_token(user.google_refresh_token)
         access_token = access_payload["access_token"]
 
         message_ids: list[str] = []

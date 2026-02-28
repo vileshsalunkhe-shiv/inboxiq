@@ -52,4 +52,4 @@ COPY --chown=worker:worker backend/ .
 STOPSIGNAL SIGTERM
 
 # Run worker with proper signal handling
-CMD ["python", "-m", "app.worker.main"]
+CMD ["python", "worker.py"]

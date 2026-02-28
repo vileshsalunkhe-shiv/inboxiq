@@ -64,13 +64,18 @@ class AuthService:
         }
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(GOOGLE_OAUTH_TOKEN_URL, data=data)
+            if response.status_code != 200:
+                # Log the full error response from Google
+                error_detail = response.text
+                print(f"Google OAuth Error: {response.status_code} - {error_detail}")
+                print(f"Request data: client_id={data['client_id'][:20]}..., redirect_uri={data['redirect_uri']}")
             response.raise_for_status()
             return response.json()
 
     async def store_google_tokens(self, user: User, tokens: dict) -> None:
         """Encrypt and store Google tokens on the user."""
         encrypted = encrypt_token(tokens.get("refresh_token", ""))
-        user.google_tokens_encrypted = encrypted
+        user.google_refresh_token = encrypted
         self.db.add(user)
         await self.db.commit()
 
