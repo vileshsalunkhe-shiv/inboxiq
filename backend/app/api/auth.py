@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
+from app.models.digest_settings import DigestSettings
 from app.schemas.auth import GoogleAuthRequest, GoogleCallbackRequest, RefreshRequest, TokenPair
 from app.services.auth_service import AuthService
 
@@ -50,6 +51,18 @@ async def google_callback(payload: GoogleCallbackRequest, db: AsyncSession = Dep
         db.add(user)
         await db.commit()
         await db.refresh(user)
+        
+        # Create default digest settings for new user
+        digest_settings = DigestSettings(
+            user_id=user.id,
+            enabled=True,
+            frequency_hours=24,
+            timezone="America/Chicago",
+            include_action_items=True,
+            include_summaries=True
+        )
+        db.add(digest_settings)
+        await db.commit()
 
     if tokens.get("refresh_token"):
         await auth_service.store_google_tokens(user, tokens)

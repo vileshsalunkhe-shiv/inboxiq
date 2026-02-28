@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_limiter import FastAPILimiter
 from sqlalchemy import text
 
-from app.api import auth_router, digest_router, emails_router, sync_router
+from app.api import auth_router, digest_router, emails_router, sync_router, actions_router
 from app.config import settings
 from app.database import engine
 from app.utils.logger import setup_logging
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(emails_router)
     app.include_router(sync_router)
     app.include_router(digest_router)
+    app.include_router(actions_router)
 
     @app.on_event("startup")
     async def startup() -> None:

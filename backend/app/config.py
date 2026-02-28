@@ -50,5 +50,9 @@ class Settings(BaseSettings):
     # Digest
     default_digest_frequency_hours: int = Field(default=12, alias="DEFAULT_DIGEST_FREQUENCY_HOURS")
 
+    # Action tokens
+    action_token_exp_hours: int = Field(default=48, alias="ACTION_TOKEN_EXP_HOURS")
+    frontend_base_url: str = Field(default="http://localhost:8000", alias="FRONTEND_BASE_URL")
+
 
 settings = Settings()

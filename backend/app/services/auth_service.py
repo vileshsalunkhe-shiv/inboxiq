@@ -24,8 +24,7 @@ from app.utils.security import (
 GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",  # Allows read, send, modify, and delete
     "openid",
     "email",
 ]
@@ -47,7 +46,7 @@ class AuthService:
             "response_type": "code",
             "scope": scope,
             "access_type": "offline",
-            "prompt": "consent",
+            "prompt": "select_account",
         }
         query = "&".join([f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items()])
         return f"{GOOGLE_OAUTH_AUTH_URL}?{query}"
@@ -138,3 +137,12 @@ class AuthService:
             response = await client.post(GOOGLE_OAUTH_TOKEN_URL, data=data)
             response.raise_for_status()
             return response.json()
+
+    async def get_google_access_token(self, user: User) -> str:
+        """Get a valid Google access token for the user."""
+        if not user.google_refresh_token:
+            raise ValueError("User has no Google refresh token")
+        
+        # Refresh the access token using stored refresh token
+        tokens = await self.refresh_google_access_token(user.google_refresh_token)
+        return tokens.get("access_token")

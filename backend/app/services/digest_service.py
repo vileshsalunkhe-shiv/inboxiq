@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Any
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +18,7 @@ from app.models import DigestSettings, Email, User
 from app.services.ai_service import AIService
 from app.services.auth_service import AuthService
 from app.services.gmail_service import GmailService
+from app.utils.action_tokens import create_action_token
 
 
 class DigestService:
@@ -28,11 +32,20 @@ class DigestService:
 
     async def get_settings(self, user_id: str) -> DigestSettings:
         """Fetch digest settings for user, create defaults if missing."""
-        result = await self.db.execute(select(DigestSettings).where(DigestSettings.user_id == user_id))
+        user_uuid = uuid.UUID(user_id)
+        result = await self.db.execute(select(DigestSettings).where(DigestSettings.user_id == user_uuid))
         settings_row = result.scalar_one_or_none()
         if settings_row:
             return settings_row
-        settings_row = DigestSettings(user_id=user_id, frequency_hours=settings.default_digest_frequency_hours)
+        # Create default settings if missing
+        settings_row = DigestSettings(
+            user_id=user_uuid,
+            enabled=True,
+            frequency_hours=24,
+            timezone="America/Chicago",
+            include_action_items=True,
+            include_summaries=True
+        )
         self.db.add(settings_row)
         await self.db.commit()
         return settings_row
@@ -69,6 +82,7 @@ class DigestService:
             "email_count": len(emails),
             "emails": [
                 {
+                    "id": e.id,
                     "subject": e.subject,
                     "sender": e.sender,
                     "category": e.category,
@@ -89,7 +103,17 @@ class DigestService:
         message["subject"] = f"InboxIQ Digest - {payload['email_count']} emails"
 
         text = f"InboxIQ Digest\n\nEmail count: {payload['email_count']}\nInsights: {payload.get('insights', '')}"
-        html = f"<h1>InboxIQ Digest</h1><p>{payload.get('insights', '')}</p>"
+
+        templates_dir = Path(__file__).resolve().parents[1] / "templates"
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
+        template = env.get_template("digest_email.html")
+        html = template.render(
+            insights=payload.get("insights", ""),
+            emails=payload.get("emails", []),
+        )
 
         message.attach(MIMEText(text, "plain"))
         message.attach(MIMEText(html, "html"))
@@ -104,8 +128,18 @@ class DigestService:
         result = await self.db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one()
 
-        access_payload = await self.auth.refresh_google_access_token(user.google_tokens_encrypted)
-        access_token = access_payload["access_token"]
+        # Add action links per email
+        for email in payload.get("emails", []):
+            email_id = email.get("id")
+            archive_token = await create_action_token(self.db, user_id, email_id, "archive")
+            delete_token = await create_action_token(self.db, user_id, email_id, "delete")
+            reply_token = await create_action_token(self.db, user_id, email_id, "reply")
+            base_url = settings.frontend_base_url.rstrip("/")
+            email["archive_url"] = f"{base_url}/actions/{archive_token}"
+            email["delete_url"] = f"{base_url}/actions/{delete_token}"
+            email["reply_url"] = f"{base_url}/actions/{reply_token}"
+
+        access_token = await self.auth.get_google_access_token(user)
 
         raw_message = self._format_digest_email(user.email, payload)
         response = await self.gmail.send_message(access_token, raw_message)

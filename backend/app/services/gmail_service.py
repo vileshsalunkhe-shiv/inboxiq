@@ -49,3 +49,30 @@ class GmailService:
         body = {"raw": base64.urlsafe_b64encode(raw_message).decode()}
         request = service.users().messages().send(userId=settings.gmail_api_user, body=body)
         return await asyncio.to_thread(request.execute)
+
+    async def archive_message(self, access_token: str, message_id: str) -> dict:
+        """Archive a message (remove INBOX label)."""
+        service = await self.build_client(access_token)
+        body = {"removeLabelIds": ["INBOX"]}
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
+        return await asyncio.to_thread(request.execute)
+
+    async def delete_message(self, access_token: str, message_id: str) -> None:
+        """Delete a message (move to trash)."""
+        service = await self.build_client(access_token)
+        request = service.users().messages().trash(userId=settings.gmail_api_user, id=message_id)
+        await asyncio.to_thread(request.execute)
+
+    async def mark_as_read(self, access_token: str, message_id: str) -> dict:
+        """Mark a message as read (remove UNREAD label)."""
+        service = await self.build_client(access_token)
+        body = {"removeLabelIds": ["UNREAD"]}
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
+        return await asyncio.to_thread(request.execute)
+
+    async def mark_as_unread(self, access_token: str, message_id: str) -> dict:
+        """Mark a message as unread (add UNREAD label)."""
+        service = await self.build_client(access_token)
+        body = {"addLabelIds": ["UNREAD"]}
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
+        return await asyncio.to_thread(request.execute)

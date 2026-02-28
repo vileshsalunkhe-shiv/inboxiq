@@ -1693,3 +1693,398 @@ The addition of comprehensive monitoring from day one ensures you'll quickly ide
 ---
 
 *Start with Week 1, focus on the sync engine, and build momentum. The hardest part is starting. This architecture ensures you're starting right.*
+
+## 9. Email Action Links
+
+### Overview
+Digest emails contain clickable action buttons that allow users to manage emails without opening the app. This feature enables frictionless email management directly from the daily digest.
+
+### Architecture
+
+```
+┌─────────────────┐
+│  Digest Email   │
+│  (HTML)         │
+│                 │
+│  📧 Email 1     │
+│  [Archive] ──┐  │
+│  [Delete]  ──┼──┐
+│  [Reply]   ──┼──┼──┐
+└──────────────┼──┼──┼─┘
+               │  │  │
+               ▼  ▼  ▼
+         ┌─────────────────┐
+         │ Action Endpoint │
+         │ /actions/{token}│
+         └────────┬─────────┘
+                  │
+         ┌────────▼─────────┐
+         │ Token Validator  │
+         │ - Check expiry   │
+         │ - Check used     │
+         │ - Verify sig     │
+         └────────┬─────────┘
+                  │
+         ┌────────▼─────────┐
+         │  Gmail API       │
+         │  - Archive       │
+         │  - Delete        │
+         │  - (Reply: URL)  │
+         └────────┬─────────┘
+                  │
+         ┌────────▼─────────┐
+         │  HTML Response   │
+         │  ✅ Success!     │
+         └──────────────────┘
+```
+
+### Token Generation
+When generating a digest email:
+1. For each email, create 3 action tokens (archive, delete, reply)
+2. Encode: `{user_id, email_id, action, exp: now+48h}`
+3. Sign with JWT secret
+4. Store hash in database
+5. Embed in email as: `<a href="/actions/{token}">Archive</a>`
+
+### Security Considerations
+- **Single-use:** Token marked as used after first access
+- **Short-lived:** 48-hour expiration prevents stale links
+- **User-bound:** Token encodes user_id, validated before action
+- **Signed:** JWT signature prevents tampering
+- **No sensitive data:** Token doesn't contain email content, only IDs
+
+### Database Schema
+```sql
+CREATE TABLE action_tokens (
+  id SERIAL PRIMARY KEY,
+  token_hash VARCHAR(255) UNIQUE NOT NULL,
+  user_id UUID NOT NULL REFERENCES users(id),
+  email_id INTEGER NOT NULL REFERENCES emails(id),
+  action VARCHAR(50) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  used_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Index for token validation
+CREATE INDEX idx_action_tokens_hash ON action_tokens(token_hash);
+CREATE INDEX idx_action_tokens_expiry ON action_tokens(expires_at) WHERE used_at IS NULL;
+```
+
+### Implementation Flow
+
+#### 1. Token Generation (During Digest Creation)
+
+```python
+# digest_service.py
+from jose import jwt
+import hashlib
+from datetime import datetime, timedelta
+
+async def generate_action_token(user_id: str, email_id: int, action: str) -> str:
+    """Generate secure action token"""
+    # Create JWT payload
+    payload = {
+        "sub": user_id,
+        "email_id": email_id,
+        "action": action,
+        "type": "action",
+        "exp": datetime.utcnow() + timedelta(hours=48)
+    }
+    
+    # Sign token
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    
+    # Store hash in database
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    await db.execute("""
+        INSERT INTO action_tokens (token_hash, user_id, email_id, action, expires_at)
+        VALUES ($1, $2, $3, $4, $5)
+    """, token_hash, user_id, email_id, action, payload["exp"])
+    
+    return token
+
+async def embed_action_links_in_digest(emails: List[dict], user_id: str) -> str:
+    """Add action buttons to each email in digest"""
+    html_parts = []
+    
+    for email in emails:
+        # Generate tokens for all actions
+        archive_token = await generate_action_token(user_id, email['id'], 'archive')
+        delete_token = await generate_action_token(user_id, email['id'], 'delete')
+        reply_token = await generate_action_token(user_id, email['id'], 'reply')
+        
+        # Build HTML with action buttons
+        email_html = f"""
+        <div class="email-item">
+            <h3>{email['subject']}</h3>
+            <p class="sender">From: {email['sender']}</p>
+            <div class="actions">
+                <a href="{API_BASE_URL}/actions/{archive_token}" class="btn btn-archive">
+                    🗂️ Archive
+                </a>
+                <a href="{API_BASE_URL}/actions/{delete_token}" class="btn btn-delete">
+                    🗑️ Delete
+                </a>
+                <a href="{API_BASE_URL}/actions/{reply_token}" class="btn btn-reply">
+                    ↩️ Reply
+                </a>
+            </div>
+        </div>
+        """
+        html_parts.append(email_html)
+    
+    return "\n".join(html_parts)
+```
+
+#### 2. Action Endpoint (Public, No Auth)
+
+```python
+# action_endpoints.py
+from fastapi import HTTPException
+from jose import jwt, JWTError
+import hashlib
+
+@app.get("/actions/{action_token}")
+async def execute_action(action_token: str):
+    """Execute email action from digest link"""
+    try:
+        # 1. Decode and validate JWT
+        try:
+            payload = jwt.decode(action_token, JWT_SECRET, algorithms=["HS256"])
+        except JWTError as e:
+            return html_error_page("Invalid action link", "This link may be corrupted.")
+        
+        # 2. Check if token exists and is unused
+        token_hash = hashlib.sha256(action_token.encode()).hexdigest()
+        token_record = await db.fetch_one("""
+            SELECT user_id, email_id, action, used_at, expires_at
+            FROM action_tokens
+            WHERE token_hash = $1
+        """, token_hash)
+        
+        if not token_record:
+            return html_error_page("Invalid action link", "This link is not recognized.")
+        
+        # 3. Check if already used
+        if token_record['used_at']:
+            return html_error_page(
+                "Link already used",
+                "This action has already been completed. Each link works only once."
+            )
+        
+        # 4. Check expiration
+        if datetime.utcnow() > token_record['expires_at']:
+            return html_error_page(
+                "Link expired",
+                "This link expired. Action links work for 48 hours."
+            )
+        
+        # 5. Verify user ownership
+        if str(token_record['user_id']) != payload['sub']:
+            return html_error_page("Unauthorized", "This action is not authorized.")
+        
+        # 6. Mark token as used IMMEDIATELY
+        await db.execute("""
+            UPDATE action_tokens
+            SET used_at = NOW()
+            WHERE token_hash = $1
+        """, token_hash)
+        
+        # 7. Execute the action
+        user_id = token_record['user_id']
+        email_id = token_record['email_id']
+        action = token_record['action']
+        
+        # Get user's Gmail credentials
+        gmail_token = await get_user_gmail_token(user_id)
+        
+        if action == 'archive':
+            await gmail_api.modify_labels(
+                gmail_token,
+                email_id,
+                remove_labels=['INBOX']
+            )
+            return html_success_page("Email archived successfully!", "You can close this tab.")
+        
+        elif action == 'delete':
+            await gmail_api.trash_message(gmail_token, email_id)
+            return html_success_page("Email moved to trash!", "You can close this tab.")
+        
+        elif action == 'reply':
+            # Get email details
+            email = await db.fetch_one("""
+                SELECT sender, subject FROM emails WHERE id = $1
+            """, email_id)
+            
+            # Build Gmail compose URL
+            compose_url = build_gmail_compose_url(
+                to=email['sender'],
+                subject=f"Re: {email['subject']}"
+            )
+            
+            # Redirect to Gmail
+            return RedirectResponse(url=compose_url)
+        
+        else:
+            return html_error_page("Unknown action", "This action is not supported.")
+    
+    except Exception as e:
+        logger.error("action_execution_failed", error=str(e), token_hash=token_hash)
+        return html_error_page(
+            "Something went wrong",
+            "We couldn't complete this action. Please try from the InboxIQ app."
+        )
+
+def html_success_page(title: str, message: str) -> HTMLResponse:
+    """Generate mobile-responsive success page"""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                max-width: 400px;
+            }}
+            .icon {{ font-size: 64px; margin-bottom: 20px; }}
+            h1 {{ font-size: 24px; margin: 20px 0; }}
+            p {{ font-size: 16px; opacity: 0.9; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">✅</div>
+            <h1>{title}</h1>
+            <p>{message}</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html, status_code=200)
+
+def html_error_page(title: str, message: str) -> HTMLResponse:
+    """Generate mobile-responsive error page"""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                color: white;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                max-width: 400px;
+            }}
+            .icon {{ font-size: 64px; margin-bottom: 20px; }}
+            h1 {{ font-size: 24px; margin: 20px 0; }}
+            p {{ font-size: 16px; opacity: 0.9; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">⚠️</div>
+            <h1>{title}</h1>
+            <p>{message}</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html, status_code=400)
+```
+
+### Cost Impact
+
+**Token Storage:**
+- ~3 tokens per email per digest
+- 1,000 users × 2 digests/day × 20 emails/digest × 3 actions = 120K tokens/day
+- Stored for 48 hours: ~240K active tokens
+- Storage: Minimal (~50MB in PostgreSQL)
+
+**Processing Overhead:**
+- Token generation: ~1ms per token (JWT sign + DB insert)
+- Token validation: ~2ms (JWT decode + DB lookup)
+- Total per digest: ~60ms for 20 emails (negligible)
+
+**Database Cleanup:**
+- Daily cron job to delete expired tokens:
+```sql
+DELETE FROM action_tokens 
+WHERE expires_at < NOW() - INTERVAL '7 days';
+```
+
+### Monitoring & Analytics
+
+Track action link usage:
+```sql
+-- Most common actions
+SELECT action, COUNT(*) as usage_count
+FROM action_tokens
+WHERE used_at IS NOT NULL
+GROUP BY action
+ORDER BY usage_count DESC;
+
+-- Action completion rate
+SELECT 
+    action,
+    COUNT(*) as total_generated,
+    COUNT(used_at) as total_used,
+    ROUND(100.0 * COUNT(used_at) / COUNT(*), 2) as usage_rate_percent
+FROM action_tokens
+GROUP BY action;
+
+-- Average time to action
+SELECT 
+    action,
+    AVG(EXTRACT(EPOCH FROM (used_at - created_at))) / 3600 as avg_hours_to_action
+FROM action_tokens
+WHERE used_at IS NOT NULL
+GROUP BY action;
+```
+
+### User Experience Considerations
+
+1. **Mobile-Optimized**: Action buttons are touch-friendly (44×44pt minimum)
+2. **Instant Feedback**: HTML response page shows immediately
+3. **Clear Messaging**: Success/error messages are user-friendly
+4. **No Login Required**: Works directly from email client
+5. **Safe Defaults**: Archive is less destructive than delete, positioned first
+
+### Integration with Existing Features
+
+The action links feature integrates seamlessly:
+- Uses existing Gmail API integration
+- Leverages existing JWT infrastructure
+- Shares database with other features
+- Monitored by existing Sentry/logging setup
+- No new external dependencies required
