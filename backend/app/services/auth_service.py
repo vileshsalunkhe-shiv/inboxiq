@@ -66,8 +66,16 @@ class AuthService:
             if response.status_code != 200:
                 # Log the full error response from Google
                 error_detail = response.text
-                print(f"Google OAuth Error: {response.status_code} - {error_detail}")
-                print(f"Request data: client_id={data['client_id'][:20]}..., redirect_uri={data['redirect_uri']}")
+                import structlog
+                logger = structlog.get_logger()
+                logger.error(
+                    "google_oauth_token_exchange_failed",
+                    status_code=response.status_code,
+                    error_detail=error_detail,
+                    client_id_prefix=data['client_id'][:20],
+                    redirect_uri=data['redirect_uri'],
+                    code_prefix=data['code'][:20] if data['code'] else None,
+                )
             response.raise_for_status()
             return response.json()
 
