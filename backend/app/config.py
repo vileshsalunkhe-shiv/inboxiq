@@ -21,6 +21,15 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
 
+    def __init__(self, **data):
+        """Override to ensure asyncpg driver is used."""
+        super().__init__(**data)
+        # Convert postgresql:// to postgresql+asyncpg:// if needed
+        if self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+
     # Auth/JWT
     jwt_secret: str = Field(default="change-me", alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
