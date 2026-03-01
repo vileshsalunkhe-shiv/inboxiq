@@ -46,7 +46,7 @@ class AuthService:
             "response_type": "code",
             "scope": scope,
             "access_type": "offline",
-            "prompt": "select_account",
+            "prompt": "consent",
         }
         query = "&".join([f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items()])
         return f"{GOOGLE_OAUTH_AUTH_URL}?{query}"
