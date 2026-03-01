@@ -23,11 +23,11 @@ async def google_authorize(payload: GoogleAuthRequest, db: AsyncSession = Depend
     return {"url": auth_service.build_google_auth_url(payload.redirect_uri)}
 
 
-@router.post("/google/callback", response_model=TokenPair)
-async def google_callback(payload: GoogleCallbackRequest, db: AsyncSession = Depends(get_db)) -> TokenPair:
+@router.get("/google/callback", response_model=TokenPair)
+async def google_callback(code: str, db: AsyncSession = Depends(get_db)) -> TokenPair:
     """Exchange Google OAuth code and issue JWTs."""
     auth_service = AuthService(db)
-    tokens = await auth_service.exchange_code_for_tokens(payload.code, payload.redirect_uri)
+    tokens = await auth_service.exchange_code_for_tokens(code, None)
     access_token = tokens.get("access_token")
     if not access_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing access token")
