@@ -21,6 +21,12 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     google_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_history_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # Google Calendar OAuth tokens
+    calendar_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    calendar_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    calendar_token_expiry: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     emails = relationship("Email", back_populates="user", cascade="all, delete-orphan")
