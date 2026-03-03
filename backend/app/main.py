@@ -19,9 +19,12 @@ from app.api import auth_router, auth_ios_router, digest_router, emails_router, 
 calendar_router = None
 try:
     from app.api.calendar import router as calendar_router
-except Exception as e:
+except ImportError as e:
     import logging
     logging.error(f"Failed to import calendar router: {e}", exc_info=True)
+except Exception as e:
+    import logging
+    logging.error(f"Unexpected error importing calendar router: {e}", exc_info=True)
 
 from app.config import settings
 from app.database import engine
