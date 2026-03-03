@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(default="", alias="GOOGLE_REDIRECT_URI")
 
+    # Google Calendar API
+    google_calendar_client_id: str = Field(default="", alias="GOOGLE_CALENDAR_CLIENT_ID")
+    google_calendar_client_secret: str = Field(default="", alias="GOOGLE_CALENDAR_CLIENT_SECRET")
+    google_calendar_redirect_uri: str = Field(default="http://localhost:8000/calendar/callback", alias="GOOGLE_CALENDAR_REDIRECT_URI")
+
     # Encryption
     encryption_key: str = Field(default="", alias="ENCRYPTION_KEY")
 
