@@ -13,7 +13,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_limiter import FastAPILimiter
 from sqlalchemy import text
 
-from app.api import auth_router, digest_router, emails_router, sync_router, actions_router
+from app.api import auth_router, auth_ios_router, digest_router, emails_router, sync_router, actions_router
+
+# Try to import calendar router, but don't fail if it's missing
+calendar_router = None
+try:
+    from app.api.calendar import router as calendar_router
+except Exception as e:
+    import logging
+    logging.error(f"Failed to import calendar router: {e}", exc_info=True)
+
 from app.config import settings
 from app.database import engine
 from app.utils.logger import setup_logging
@@ -37,10 +46,17 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(auth_router)
+    app.include_router(auth_ios_router)
     app.include_router(emails_router)
     app.include_router(sync_router)
     app.include_router(digest_router)
     app.include_router(actions_router)
+    
+    if calendar_router:
+        app.include_router(calendar_router)
+        logger.info("Calendar router loaded successfully")
+    else:
+        logger.warning("Calendar router not available - calendar endpoints disabled")
 
     @app.on_event("startup")
     async def startup() -> None:
