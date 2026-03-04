@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>InboxIQ Digest</title>
+  </head>
+  <body style="font-family: Arial, sans-serif;">
+    <h1>InboxIQ Digest</h1>
+    <p>{{ insights }}</p>
+    {% for email in emails %}
+    <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0;">
+      <h3>{{ email.subject }}</h3>
+      <p><strong>From:</strong> {{ email.sender }}</p>
+      <p>{{ email.snippet }}</p>
+      <div style="margin-top: 10px;">
+        <a href="{{ email.archive_url }}" style="background: #4CAF50; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 10px;">Archive</a>
+        <a href="{{ email.delete_url }}" style="background: #f44336; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 10px;">Delete</a>
+        <a href="{{ email.reply_url }}" style="background: #2196F3; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px;">Reply</a>
+      </div>
+    </div>
+    {% endfor %}
+  </body>
+</html>

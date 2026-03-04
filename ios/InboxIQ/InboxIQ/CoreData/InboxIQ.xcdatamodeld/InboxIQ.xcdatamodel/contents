@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24512" systemVersion="25C56" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="CalendarEventEntity" representedClassName="CalendarEventEntity" syncable="YES">
+        <attribute name="endDate" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="eventDescription" optional="YES" attributeType="String"/>
+        <attribute name="eventId" attributeType="String"/>
+        <attribute name="htmlLink" optional="YES" attributeType="String"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="location" optional="YES" attributeType="String"/>
+        <attribute name="startDate" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="summary" attributeType="String"/>
+        <relationship name="user" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="UserEntity" inverseName="calendarEvents" inverseEntity="UserEntity"/>
+    </entity>
+    <entity name="CategoryEntity" representedClassName="CategoryEntity" syncable="YES">
+        <attribute name="color" attributeType="String"/>
+        <attribute name="count" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="icon" attributeType="String"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <relationship name="emails" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="EmailEntity" inverseName="category" inverseEntity="EmailEntity"/>
+    </entity>
+    <entity name="EmailEntity" representedClassName="EmailEntity" syncable="YES">
+        <attribute name="gmailId" attributeType="String"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isUnread" attributeType="Boolean"/>
+        <attribute name="receivedAt" attributeType="Date"/>
+        <attribute name="sender" attributeType="String"/>
+        <attribute name="snippet" attributeType="String"/>
+        <attribute name="subject" attributeType="String"/>
+        <attribute name="syncedAt" attributeType="Date"/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CategoryEntity"/>
+        <relationship name="user" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="UserEntity" inverseName="emails" inverseEntity="UserEntity"/>
+    </entity>
+    <entity name="UserEntity" representedClassName="UserEntity" syncable="YES">
+        <attribute name="calendarConnected" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="email" optional="YES" attributeType="String"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="lastSyncDate" optional="YES" attributeType="Date"/>
+        <relationship name="calendarEvents" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CalendarEventEntity" inverseName="user" inverseEntity="CalendarEventEntity"/>
+        <relationship name="emails" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="EmailEntity" inverseName="user" inverseEntity="EmailEntity"/>
+    </entity>
+</model>

@@ -30,11 +30,13 @@ graph TB
         AuthSvc[Auth Service]
         SyncSvc[Sync Engine]
         AISvc[AI Service]
+        CalSvc[Calendar Service]
         Worker[Python Worker]
     end
     
     subgraph "External Services"
         Gmail[Gmail API]
+        Calendar[Google Calendar API]
         Claude[Claude AI]
         APNs[Apple Push]
     end
@@ -48,10 +50,12 @@ graph TB
     BgSync <--> FastAPI
     AuthMgr <--> AuthSvc
     FastAPI <--> Gmail
+    FastAPI <--> Calendar
     Worker <--> Claude
     FastAPI <--> PG
     FastAPI <--> Redis
     Gmail --> FastAPI
+    Calendar --> FastAPI
     FastAPI --> APNs
     APNs --> BgSync
     LocalDB <--> UI
@@ -462,6 +466,13 @@ POST   /categories          # Create custom category
 PATCH  /categories/{id}     # Update category
 DELETE /categories/{id}     # Delete category
 
+# Calendar Integration ✨ NEW
+GET    /api/calendar/auth/initiate    # Start Calendar OAuth
+GET    /api/calendar/auth/callback    # OAuth callback (handled by Google)
+GET    /api/calendar/events           # List upcoming events
+POST   /api/calendar/events           # Create calendar event
+GET    /api/calendar/status           # Check connection status
+
 # Push Notifications
 POST   /push/register       # Register device token
 DELETE /push/unregister     # Remove device token
@@ -594,6 +605,232 @@ class PushNotificationService:
         
         await self.apns_client.send_notification(token, payload)
 ```
+
+### Google Calendar Integration ✨ NEW
+
+**Added:** March 2, 2026
+
+The Calendar integration enables users to connect their Google Calendar, view upcoming events, and create events directly from the app.
+
+**Key Features:**
+- OAuth 2.0 authentication with Google Calendar
+- View upcoming calendar events (next 7 days)
+- Create calendar events with attendees
+- Check connection status
+- Automatic token refresh
+
+**Architecture:**
+
+```python
+# app/services/calendar_service.py
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+
+class GoogleCalendarService:
+    """Google Calendar API client with OAuth 2.0 authentication."""
+    
+    SCOPES = [
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events'
+    ]
+    
+    def __init__(self):
+        self.client_id = os.getenv("GOOGLE_CALENDAR_CLIENT_ID")
+        self.client_secret = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET")
+        self.redirect_uri = os.getenv("GOOGLE_CALENDAR_REDIRECT_URI")
+    
+    def get_authorization_url(self, state: str) -> str:
+        """Generate OAuth authorization URL."""
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [self.redirect_uri]
+                }
+            },
+            scopes=self.SCOPES,
+            redirect_uri=self.redirect_uri
+        )
+        
+        authorization_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            state=state,
+            prompt='consent'
+        )
+        
+        return authorization_url
+    
+    def list_events(self, access_token: str, max_results: int = 10):
+        """List upcoming calendar events."""
+        credentials = Credentials(
+            token=access_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            scopes=self.SCOPES
+        )
+        
+        service = build('calendar', 'v3', credentials=credentials)
+        
+        time_min = datetime.utcnow()
+        time_max = time_min + timedelta(days=7)
+        
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min.isoformat() + 'Z',
+            timeMax=time_max.isoformat() + 'Z',
+            maxResults=max_results,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        return events_result.get('items', [])
+    
+    def create_event(self, access_token: str, summary: str, 
+                    start_time: datetime, end_time: datetime,
+                    description: str = None, location: str = None,
+                    attendees: list = None):
+        """Create a new calendar event."""
+        credentials = Credentials(
+            token=access_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            scopes=self.SCOPES
+        )
+        
+        service = build('calendar', 'v3', credentials=credentials)
+        
+        event = {
+            'summary': summary,
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': 'America/Chicago',
+            },
+            'end': {
+                'dateTime': end_time.isoformat(),
+                'timeZone': 'America/Chicago',
+            }
+        }
+        
+        if description:
+            event['description'] = description
+        if location:
+            event['location'] = location
+        if attendees:
+            event['attendees'] = [{'email': email} for email in attendees]
+        
+        created_event = service.events().insert(
+            calendarId='primary',
+            body=event
+        ).execute()
+        
+        return created_event
+
+# Global service instance
+calendar_service = GoogleCalendarService()
+```
+
+**API Endpoints:**
+
+```python
+# app/api/calendar.py
+from fastapi import APIRouter, HTTPException, Query
+from app.services.calendar_service import calendar_service
+
+router = APIRouter(prefix="/calendar", tags=["calendar"])
+
+@router.get("/auth/initiate")
+async def initiate_calendar_auth(user_id: int = Query(...)):
+    """Initiate Google Calendar OAuth flow."""
+    state = secrets.token_urlsafe(32)
+    auth_url = calendar_service.get_authorization_url(state)
+    
+    return {
+        "authorization_url": auth_url,
+        "state": state
+    }
+
+@router.get("/events")
+async def list_calendar_events(
+    user_id: int = Query(...),
+    max_results: int = Query(10, ge=1, le=100)
+):
+    """List upcoming calendar events."""
+    # Get user's calendar tokens from database
+    user = db.get_user(user_id)
+    
+    if not user.calendar_access_token:
+        raise HTTPException(401, "Calendar not connected")
+    
+    events = calendar_service.list_events(
+        user.calendar_access_token,
+        max_results
+    )
+    
+    return events
+
+@router.post("/events")
+async def create_calendar_event(
+    event: CreateEventRequest,
+    user_id: int = Query(...)
+):
+    """Create a new calendar event."""
+    user = db.get_user(user_id)
+    
+    if not user.calendar_access_token:
+        raise HTTPException(401, "Calendar not connected")
+    
+    created = calendar_service.create_event(
+        user.calendar_access_token,
+        summary=event.summary,
+        start_time=event.start_time,
+        end_time=event.end_time,
+        description=event.description,
+        location=event.location,
+        attendees=event.attendees
+    )
+    
+    return created
+```
+
+**Database Schema (Pending Migration):**
+
+```sql
+-- Add calendar token columns to users table
+ALTER TABLE users
+ADD COLUMN calendar_access_token TEXT,
+ADD COLUMN calendar_refresh_token TEXT,
+ADD COLUMN calendar_token_expiry TIMESTAMP;
+
+-- Create index for token expiry checks
+CREATE INDEX idx_users_calendar_expiry 
+ON users(calendar_token_expiry) 
+WHERE calendar_token_expiry IS NOT NULL;
+```
+
+**Rate Limits:**
+- Google Calendar API: 1,000,000 queries/day
+- Per-user limit: 500 queries/100 seconds
+
+**Documentation:**
+- Setup Guide: [GOOGLE-CALENDAR-SETUP.md](GOOGLE-CALENDAR-SETUP.md)
+- Integration Summary: [CALENDAR-INTEGRATION-SUMMARY.md](CALENDAR-INTEGRATION-SUMMARY.md)
+- API Documentation: [API-DOCUMENTATION.md](API-DOCUMENTATION.md#calendar-integration)
+- Third-Party Integrations: [INTEGRATIONS.md](INTEGRATIONS.md#google-calendar-integration)
+
+**Future Enhancements:**
+- [ ] Calendar-email linking (show related emails for events)
+- [ ] Smart meeting suggestions from emails
+- [ ] Event reminders in daily digest
+- [ ] Multiple calendar support (non-primary calendars)
+- [ ] Calendar webhook subscriptions for real-time updates
 
 ## 4. Daily Email Digest Feature
 

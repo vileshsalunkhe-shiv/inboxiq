@@ -90,7 +90,15 @@ class SyncService:
         if result.scalar_one_or_none():
             return 0
 
-        message = await self.gmail.get_message(access_token, message_id)
+        try:
+            message = await self.gmail.get_message(access_token, message_id)
+        except Exception as e:
+            # Skip deleted/missing emails (404 errors) gracefully
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.warning("email_not_found_skipping", message_id=message_id, error=str(e))
+                return 0
+            # Re-raise other errors
+            raise
         headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
         subject = headers.get("subject")
         sender = headers.get("from")
