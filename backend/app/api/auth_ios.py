@@ -164,11 +164,12 @@ async def ios_oauth_callback(
         
         logger.info("ios_oauth_callback_success", user_id=user.id, email=email)
         
-        # Redirect to iOS app with JWT tokens
+        # Redirect to iOS app with JWT tokens AND user_id
         params = urlencode({
             "access_token": access_token,
             "refresh_token": refresh_token,
             "user_email": email,
+            "user_id": str(user.id),  # Backend user ID for API calls
             "expires_in": str(expires_in)
         })
         return RedirectResponse(url=f"inboxiq://login?{params}")
