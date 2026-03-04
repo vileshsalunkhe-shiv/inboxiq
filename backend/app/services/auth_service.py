@@ -79,6 +79,16 @@ class AuthService:
             response.raise_for_status()
             return response.json()
 
+    async def get_google_user_profile(self, access_token: str) -> dict:
+        """Get user profile from Google using access token."""
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def store_google_tokens(self, user: User, tokens: dict) -> None:
         """Encrypt and store Google tokens on the user."""
         encrypted = encrypt_token(tokens.get("refresh_token", ""))
