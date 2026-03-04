@@ -41,7 +41,7 @@ async def ios_login(
         # CRITICAL: This must match what iOS used to get the code
         token_data = await auth_service.exchange_code_for_tokens(
             code=request.code,
-            redirect_uri="inboxiq://oauth/callback"  # iOS redirect URI
+            redirect_uri="com.googleusercontent.apps.535816296321-0l834ob6tluso0d4hr8igp4ehe80mc4b:/oauth2redirect"  # iOS redirect URI
         )
         
         # Get user profile
