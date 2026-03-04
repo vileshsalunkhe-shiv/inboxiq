@@ -56,6 +56,11 @@ class CalendarTokens(BaseModel):
     expiry: Optional[str]
 
 
+class CalendarAttendee(BaseModel):
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+
+
 class CalendarEvent(BaseModel):
     id: str
     summary: str
@@ -63,7 +68,7 @@ class CalendarEvent(BaseModel):
     start: str
     end: str
     location: Optional[str] = None
-    attendees: List[str] = []
+    attendees: List[CalendarAttendee] = []
     html_link: str
 
 
