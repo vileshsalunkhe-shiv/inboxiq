@@ -1,9 +1,10 @@
 """iOS-specific auth endpoints."""
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel
 import structlog
 
 from app.database import get_db
@@ -16,9 +17,13 @@ router = APIRouter()
 logger = structlog.get_logger()
 
 
+class IOSLoginRequest(BaseModel):
+    code: str
+
+
 @router.post("/auth/ios/login")  # Custom response, not standard TokenPair
 async def ios_login(
-    code: str,
+    request: IOSLoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     """
@@ -30,12 +35,12 @@ async def ios_login(
     auth_service = AuthService(db)
     
     try:
-        logger.info("ios_oauth_login_attempt", code_prefix=code[:20] if code else None)
+        logger.info("ios_oauth_login_attempt", code_prefix=request.code[:20] if request.code else None)
         
         # Exchange code for tokens using iOS redirect URI
         # CRITICAL: This must match what iOS used to get the code
         token_data = await auth_service.exchange_code_for_tokens(
-            code=code,
+            code=request.code,
             redirect_uri="inboxiq://oauth/callback"  # iOS redirect URI
         )
         
