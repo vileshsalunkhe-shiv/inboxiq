@@ -1,10 +1,12 @@
 """iOS-specific auth endpoints."""
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
+from urllib.parse import urlencode
 import structlog
 
 from app.database import get_db
@@ -92,3 +94,90 @@ async def ios_login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OAuth login failed: {str(e)}"
         )
+
+
+@router.get("/auth/ios/callback")
+async def ios_oauth_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    state: Optional[str] = Query(None, description="State parameter for CSRF protection"),
+    error: Optional[str] = Query(None, description="Error from OAuth provider"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    OAuth callback endpoint for iOS.
+    
+    Flow:
+    1. User authorizes in browser
+    2. Google redirects here with code
+    3. Backend exchanges code for Google tokens
+    4. Backend creates/updates user
+    5. Backend generates JWT tokens
+    6. Backend redirects to iOS app with JWT tokens
+    """
+    if error:
+        logger.error("ios_oauth_callback_error", error=error)
+        # Redirect to app with error
+        error_params = urlencode({"error": error})
+        return RedirectResponse(url=f"inboxiq://login?{error_params}")
+    
+    auth_service = AuthService(db)
+    
+    try:
+        logger.info("ios_oauth_callback_received", code_prefix=code[:20] if code else None)
+        
+        # Exchange code for Google tokens using Web client
+        # This uses the backend's redirect URI
+        token_data = await auth_service.exchange_code_for_tokens(
+            code=code,
+            redirect_uri=f"{settings.api_base_url}/auth/ios/callback"
+        )
+        
+        # Get user profile from Google
+        profile = await auth_service.get_google_user_profile(token_data["access_token"])
+        email = profile.get("email")
+        
+        if not email:
+            logger.error("ios_oauth_callback_no_email")
+            error_params = urlencode({"error": "no_email"})
+            return RedirectResponse(url=f"inboxiq://login?{error_params}")
+        
+        # Find or create user
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            user = User(email=email)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            logger.info("ios_oauth_callback_user_created", email=email, user_id=user.id)
+        else:
+            logger.info("ios_oauth_callback_user_found", email=email, user_id=user.id)
+        
+        # Store Google tokens in database
+        await auth_service.store_google_tokens(user, token_data)
+        
+        # Generate JWT tokens for the app
+        access_token, refresh_token, expires_in = await auth_service.create_token_pair(
+            str(user.id)
+        )
+        
+        logger.info("ios_oauth_callback_success", user_id=user.id, email=email)
+        
+        # Redirect to iOS app with JWT tokens
+        params = urlencode({
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user_email": email,
+            "expires_in": str(expires_in)
+        })
+        return RedirectResponse(url=f"inboxiq://login?{params}")
+        
+    except Exception as e:
+        logger.error(
+            "ios_oauth_callback_failed",
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        error_params = urlencode({"error": "auth_failed"})
+        return RedirectResponse(url=f"inboxiq://login?{error_params}")
