@@ -216,6 +216,14 @@ class GoogleCalendarService:
             # Format events
             formatted_events = []
             for event in events:
+                # Format attendees as objects (iOS expects {email, display_name})
+                attendees = []
+                for attendee in event.get('attendees', []):
+                    attendees.append({
+                        'email': attendee.get('email'),
+                        'display_name': attendee.get('displayName')
+                    })
+                
                 formatted_events.append({
                     'id': event['id'],
                     'summary': event.get('summary', 'No Title'),
@@ -223,7 +231,7 @@ class GoogleCalendarService:
                     'start': event['start'].get('dateTime', event['start'].get('date')),
                     'end': event['end'].get('dateTime', event['end'].get('date')),
                     'location': event.get('location'),
-                    'attendees': [a.get('email') for a in event.get('attendees', [])],
+                    'attendees': attendees if attendees else [],
                     'html_link': event.get('htmlLink')
                 })
             
