@@ -7,16 +7,20 @@ from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.database import get_db
-from app.main import limiter
 from app.models import User
 from app.schemas.digest import DigestSettingsIn, DigestSettingsOut
 from app.services.digest_service import DigestService
 
 logger = logging.getLogger(__name__)
+
+# Create limiter instance for this router
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/digest", tags=["digest"])
 
