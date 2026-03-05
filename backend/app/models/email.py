@@ -37,4 +37,4 @@ class Email(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship("User", back_populates="emails")
-    ai_queue = relationship("AIQueue", back_populates="email", uselist=False)
+    ai_queue = relationship("AIQueue", back_populates="email", uselist=False, cascade="all, delete-orphan")
