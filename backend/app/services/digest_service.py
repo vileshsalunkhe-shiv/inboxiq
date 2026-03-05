@@ -1,11 +1,12 @@
-"""Daily digest service."""
+"""Daily digest service for InboxIQ."""
 
 from __future__ import annotations
 
-import uuid
+import asyncio
+import logging
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from email.message import EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 
@@ -13,134 +14,208 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.models import DigestSettings, Email, User
-from app.services.ai_service import AIService
+from app.models import Email, User
 from app.services.auth_service import AuthService
+from app.services.calendar_service import GoogleCalendarService
 from app.services.gmail_service import GmailService
-from app.utils.action_tokens import create_action_token
+
+logger = logging.getLogger(__name__)
 
 
 class DigestService:
-    """Generates and sends digest emails."""
+    """Generates and sends daily digest emails."""
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.ai = AIService()
         self.gmail = GmailService()
+        self.calendar = GoogleCalendarService()
         self.auth = AuthService(db)
-
-    async def get_settings(self, user_id: str) -> DigestSettings:
-        """Fetch digest settings for user, create defaults if missing."""
-        user_uuid = uuid.UUID(user_id)
-        result = await self.db.execute(select(DigestSettings).where(DigestSettings.user_id == user_uuid))
-        settings_row = result.scalar_one_or_none()
-        if settings_row:
-            return settings_row
-        # Create default settings if missing
-        settings_row = DigestSettings(
-            user_id=user_uuid,
-            enabled=True,
-            frequency_hours=settings.default_digest_frequency_hours,
-            timezone="America/Chicago",
-            include_action_items=True,
-            include_summaries=True
-        )
-        self.db.add(settings_row)
-        await self.db.commit()
-        return settings_row
-
-    async def update_settings(self, user_id: str, payload: dict[str, Any]) -> DigestSettings:
-        """Update digest settings."""
-        settings_row = await self.get_settings(user_id)
-        for key, value in payload.items():
-            setattr(settings_row, key, value)
-        settings_row.updated_at = datetime.utcnow()
-        self.db.add(settings_row)
-        await self.db.commit()
-        return settings_row
-
-    async def generate_digest_payload(self, user_id: str) -> dict[str, Any] | None:
-        """Generate digest data for the last N hours."""
-        settings_row = await self.get_settings(user_id)
-        period_end = datetime.utcnow()
-        period_start = period_end - timedelta(hours=settings_row.frequency_hours)
-
-        stmt = select(Email).where(
-            Email.user_id == user_id,
-            Email.received_at >= period_start,
-            Email.received_at < period_end,
-        )
-        result = await self.db.execute(stmt)
-        emails = result.scalars().all()
-        if not emails:
-            return None
-
-        payload = {
-            "period_start": period_start.isoformat(),
-            "period_end": period_end.isoformat(),
-            "email_count": len(emails),
-            "emails": [
-                {
-                    "id": e.id,
-                    "subject": e.subject,
-                    "sender": e.sender,
-                    "category": e.category,
-                    "snippet": e.snippet,
-                }
-                for e in emails
-            ],
-        }
-        ai_summary = await self.ai.summarize_digest(payload)
-        payload.update(ai_summary)
-        return payload
-
-    def _format_digest_email(self, user_email: str, payload: dict[str, Any]) -> bytes:
-        """Format digest email as MIME message."""
-        message = MIMEMultipart("alternative")
-        message["to"] = user_email
-        message["from"] = f"InboxIQ Digest <{user_email}>"
-        message["subject"] = f"InboxIQ Digest - {payload['email_count']} emails"
-
-        text = f"InboxIQ Digest\n\nEmail count: {payload['email_count']}\nInsights: {payload.get('insights', '')}"
-
         templates_dir = Path(__file__).resolve().parents[1] / "templates"
-        env = Environment(
+        self.env = Environment(
             loader=FileSystemLoader(str(templates_dir)),
             autoescape=select_autoescape(["html", "xml"]),
         )
-        template = env.get_template("digest_email.html")
-        html = template.render(
-            insights=payload.get("insights", ""),
-            emails=payload.get("emails", []),
-        )
 
-        message.attach(MIMEText(text, "plain"))
-        message.attach(MIMEText(html, "html"))
-        return message.as_bytes()
-
-    async def send_digest(self, user_id: str) -> str | None:
-        """Send digest email via Gmail API."""
-        payload = await self.generate_digest_payload(user_id)
-        if not payload:
-            return None
-
+    async def _get_user(self, user_id: str) -> User:
         result = await self.db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one()
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("User not found")
+        return user
 
-        # Add action links per email
-        for email in payload.get("emails", []):
-            email_id = email.get("id")
-            archive_token = await create_action_token(self.db, user_id, email_id, "archive")
-            delete_token = await create_action_token(self.db, user_id, email_id, "delete")
-            reply_token = await create_action_token(self.db, user_id, email_id, "reply")
-            base_url = settings.frontend_base_url.rstrip("/")
-            email["archive_url"] = f"{base_url}/actions/{archive_token}"
-            email["delete_url"] = f"{base_url}/actions/{delete_token}"
-            email["reply_url"] = f"{base_url}/actions/{reply_token}"
+    @staticmethod
+    def _truncate(value: str | None, limit: int) -> str:
+        if not value:
+            return ""
+        if len(value) <= limit:
+            return value
+        return value[: max(0, limit - 1)] + "…"
+
+    @staticmethod
+    def _normalize_category(value: str | None) -> str:
+        if not value:
+            return "other"
+        normalized = value.strip().lower().replace("-", " ").replace("_", " ")
+        if "urgent" in normalized:
+            return "urgent"
+        if "action" in normalized:
+            return "action required"
+        if "finance" in normalized:
+            return "finance"
+        if normalized == "fyi" or "fyi" in normalized:
+            return "fyi"
+        if "newsletter" in normalized:
+            return "newsletter"
+        return "other"
+
+    @staticmethod
+    def _format_sender(value: str | None) -> tuple[str, str]:
+        if not value:
+            return "", ""
+        name, email = parseaddr(value)
+        return name or email, email
+
+    @staticmethod
+    def _format_datetime(value: datetime | None) -> str:
+        if not value:
+            return ""
+        return value.strftime("%b %d, %I:%M %p")
+
+    async def _get_calendar_events(self, user: User) -> list[dict[str, Any]]:
+        if not user.calendar_access_token:
+            return []
+
+        time_min = datetime.utcnow()
+        time_max = time_min + timedelta(hours=24)
+        try:
+            events = await asyncio.to_thread(
+                self.calendar.list_events,
+                user.calendar_access_token,
+                user.calendar_refresh_token,
+                10,
+                time_min,
+                time_max,
+            )
+        except Exception as exc:
+            logger.warning("calendar_events_failed", exc_info=exc)
+            return []
+
+        formatted = []
+        for event in events:
+            formatted.append(
+                {
+                    "title": event.get("summary") or "Untitled event",
+                    "start_time": event.get("start"),
+                    "location": event.get("location"),
+                    "html_link": event.get("html_link"),
+                }
+            )
+        return formatted
+
+    async def get_digest_data(self, user_id: str) -> dict[str, Any]:
+        user = await self._get_user(user_id)
+
+        period_end = datetime.utcnow()
+        period_start = period_end - timedelta(hours=24)
+
+        stmt = (
+            select(Email)
+            .where(Email.user_id == user.id, Email.received_at >= period_start)
+            .order_by(Email.received_at.desc())
+        )
+        result = await self.db.execute(stmt)
+        emails = result.scalars().all()
+
+        unread_count = sum(1 for email in emails if email.is_unread)
+
+        category_map = {
+            "urgent": 0,
+            "action required": 0,
+            "finance": 0,
+            "fyi": 0,
+            "newsletter": 0,
+            "other": 0,
+        }
+
+        urgent_candidates: list[Email] = []
+        for email in emails:
+            normalized = self._normalize_category(email.category)
+            if normalized not in category_map:
+                normalized = "other"
+            category_map[normalized] += 1
+            if normalized in {"urgent", "action required"}:
+                urgent_candidates.append(email)
+
+        urgent_emails = []
+        for email in urgent_candidates[:5]:
+            sender_name, sender_email = self._format_sender(email.sender)
+            urgent_emails.append(
+                {
+                    "subject": self._truncate(email.subject, 60),
+                    "sender_name": sender_name,
+                    "sender_email": sender_email,
+                    "snippet": self._truncate(email.snippet, 100),
+                    "timestamp": self._format_datetime(email.received_at),
+                    "link": (
+                        f"https://mail.google.com/mail/u/0/#inbox/{email.gmail_id}"
+                        if email.gmail_id
+                        else "#"
+                    ),
+                }
+            )
+
+        calendar_events = await self._get_calendar_events(user)
+
+        category_breakdown = [
+            {"name": "Urgent", "count": category_map["urgent"]},
+            {"name": "Action Required", "count": category_map["action required"]},
+            {"name": "Finance", "count": category_map["finance"]},
+            {"name": "FYI", "count": category_map["fyi"]},
+            {"name": "Newsletter", "count": category_map["newsletter"]},
+            {"name": "Other", "count": category_map["other"]},
+        ]
+
+        return {
+            "generated_at": period_end.isoformat() + "Z",
+            "digest_date": period_end.strftime("%B %d, %Y"),
+            "period_start": period_start.isoformat() + "Z",
+            "period_end": period_end.isoformat() + "Z",
+            "email_count": len(emails),
+            "unread_count": unread_count,
+            "urgent_emails": urgent_emails,
+            "calendar_events": calendar_events,
+            "calendar_event_count": len(calendar_events),
+            "category_breakdown": category_breakdown,
+            "user_email": user.email,
+        }
+
+    async def generate_digest_html(self, user_id: str) -> tuple[str, dict[str, Any]]:
+        data = await self.get_digest_data(user_id)
+        template = self.env.get_template("digest_email.html")
+        html = template.render(**data)
+        return html, data
+
+    async def send_digest_email(self, user_id: str) -> dict[str, Any]:
+        user = await self._get_user(user_id)
+        html, data = await self.generate_digest_html(user_id)
+
+        subject = f"Your Daily InboxIQ Digest - {data['digest_date']}"
+        message = EmailMessage()
+        message["From"] = user.email
+        message["To"] = user.email
+        message["Subject"] = subject
+        message.set_content("Your InboxIQ digest is ready. Please view in an HTML-capable email client.")
+        message.add_alternative(html, subtype="html")
 
         access_token = await self.auth.get_google_access_token(user)
+        response = await self.gmail.send_message(access_token, message.as_bytes())
 
-        raw_message = self._format_digest_email(user.email, payload)
-        response = await self.gmail.send_message(access_token, raw_message)
-        return response.get("id")
+        user.last_digest_sent_at = datetime.utcnow()
+        self.db.add(user)
+        await self.db.commit()
+
+        return {
+            "message_id": response.get("id"),
+            "sent_at": datetime.utcnow().isoformat() + "Z",
+            "recipient": user.email,
+        }

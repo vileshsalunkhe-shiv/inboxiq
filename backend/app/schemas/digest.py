@@ -1,30 +1,21 @@
-"""Digest schemas."""
+"""Schemas for digest settings."""
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
 class DigestSettingsIn(BaseModel):
-    """Update digest settings."""
-
-    enabled: bool = True
-    frequency_hours: int = 12
-    preferred_time: time | None = None
-    timezone: str = "America/Chicago"
-    include_action_items: bool = True
-    include_summaries: bool = True
+    enabled: bool
+    preferred_time: str  # Format: "HH:MM" e.g. "07:00"
 
 
-class DigestSettingsOut(DigestSettingsIn):
-    """Digest settings response."""
+class DigestSettingsOut(BaseModel):
+    enabled: bool
+    preferred_time: str
+    last_sent_at: datetime | None
 
-    user_id: str
-
-
-class DigestSendResponse(BaseModel):
-    """Response for manual digest send."""
-
-    status: str
-    message: str
+    class Config:
+        from_attributes = True

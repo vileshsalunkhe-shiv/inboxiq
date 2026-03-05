@@ -1,23 +1,131 @@
 <!doctype html>
-<html lang="en">
+<html>
   <head>
     <meta charset="utf-8" />
-    <title>InboxIQ Digest</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InboxIQ Daily Digest</title>
   </head>
-  <body style="font-family: Arial, sans-serif;">
-    <h1>InboxIQ Digest</h1>
-    <p>{{ insights }}</p>
-    {% for email in emails %}
-    <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0;">
-      <h3>{{ email.subject }}</h3>
-      <p><strong>From:</strong> {{ email.sender }}</p>
-      <p>{{ email.snippet }}</p>
-      <div style="margin-top: 10px;">
-        <a href="{{ email.archive_url }}" style="background: #4CAF50; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 10px;">Archive</a>
-        <a href="{{ email.delete_url }}" style="background: #f44336; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 10px;">Delete</a>
-        <a href="{{ email.reply_url }}" style="background: #2196F3; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px;">Reply</a>
-      </div>
-    </div>
-    {% endfor %}
+  <body style="margin:0;padding:0;background-color:#f4f5f7;font-family:Arial, sans-serif;color:#111827;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f4f5f7;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="background-color:#ffffff;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td style="background-color:#1f2937;padding:24px 32px;color:#ffffff;">
+                <div style="font-size:20px;font-weight:700;letter-spacing:0.5px;">InboxIQ</div>
+                <div style="font-size:14px;opacity:0.8;margin-top:4px;">Daily Digest · {{ digest_date }}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 32px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="font-size:16px;font-weight:700;">Today’s Snapshot</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-top:12px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
+                            <div style="font-size:14px;color:#6b7280;">Unread last 24h</div>
+                            <div style="font-size:28px;font-weight:700;margin-top:4px;">{{ unread_count }}</div>
+                          </td>
+                          <td style="width:16px;"></td>
+                          <td style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
+                            <div style="font-size:14px;color:#6b7280;">Total emails</div>
+                            <div style="font-size:28px;font-weight:700;margin-top:4px;">{{ email_count }}</div>
+                          </td>
+                          <td style="width:16px;"></td>
+                          <td style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
+                            <div style="font-size:14px;color:#6b7280;">Calendar events</div>
+                            <div style="font-size:28px;font-weight:700;margin-top:4px;">{{ calendar_event_count }}</div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 24px;">
+                <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Urgent &amp; Action Required</div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  {% if urgent_emails %}
+                    {% for email in urgent_emails %}
+                    <tr>
+                      <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;">
+                        <div style="font-size:14px;font-weight:700;">
+                          {{ email.subject|e }}
+                        </div>
+                        <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+                          {{ email.sender_name|e }}{% if email.sender_email %} · {{ email.sender_email|e }}{% endif %}
+                          <span style="float:right;">{{ email.timestamp }}</span>
+                        </div>
+                        <div style="font-size:13px;color:#374151;margin-top:6px;">
+                          {{ email.snippet|e }}
+                        </div>
+                        <div style="margin-top:6px;">
+                          <a href="{{ email.link }}" style="font-size:12px;color:#2563eb;text-decoration:none;">Open in Gmail</a>
+                        </div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td style="padding:12px 0;color:#6b7280;font-size:13px;">No urgent or action required emails in the last 24 hours.</td>
+                    </tr>
+                  {% endif %}
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 24px;">
+                <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Upcoming Calendar (24h)</div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  {% if calendar_events %}
+                    {% for event in calendar_events %}
+                    <tr>
+                      <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;">
+                        <div style="font-size:14px;font-weight:700;">{{ event.title|e }}</div>
+                        <div style="font-size:12px;color:#6b7280;margin-top:4px;">
+                          {{ event.start_time }}{% if event.location %} · {{ event.location|e }}{% endif %}
+                        </div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td style="padding:12px 0;color:#6b7280;font-size:13px;">No upcoming events.</td>
+                    </tr>
+                  {% endif %}
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px;">
+                <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Category Breakdown</div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;">
+                  {% for item in category_breakdown %}
+                  <tr>
+                    <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;">{{ item.name }}</td>
+                    <td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#111827;font-weight:700;text-align:right;">{{ item.count }}</td>
+                  </tr>
+                  {% endfor %}
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="background-color:#f9fafb;padding:20px 32px;">
+                <div style="font-size:12px;color:#6b7280;">Generated at {{ generated_at }}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:6px;">
+                  <a href="#" style="color:#2563eb;text-decoration:none;">Manage preferences</a>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>
