@@ -7,17 +7,19 @@ from pydantic import BaseModel
 
 
 class EmailOut(BaseModel):
-    """Email response payload."""
+    """Email response payload - matches iOS expectations."""
 
     id: str
     gmail_id: str
     subject: str | None = None
     sender: str | None = None
+    body_preview: str | None = None  # Renamed from snippet
+    received_date: datetime | None = None  # Renamed from received_at
+    is_unread: bool = True  # Added for iOS
+    is_starred: bool = False  # Added for iOS (column doesn't exist yet, default False)
     category: str | None = None
     ai_summary: str | None = None
     ai_confidence: float | None = None
-    snippet: str | None = None
-    received_at: datetime | None = None
 
 
 class EmailList(BaseModel):

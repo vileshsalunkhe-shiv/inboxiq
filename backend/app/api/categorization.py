@@ -40,11 +40,13 @@ async def categorize_email(
         gmail_id=email.gmail_id,
         subject=email.subject,
         sender=email.sender,
+        body_preview=email.snippet,  # Fixed: map snippet → body_preview
+        received_date=email.received_at,  # Fixed: map received_at → received_date
+        is_unread=email.is_unread,  # Fixed: add is_unread
+        is_starred=False,  # Fixed: default False (column doesn't exist yet)
         category=email.category,
         ai_summary=email.ai_summary,
         ai_confidence=email.ai_confidence,
-        snippet=email.snippet,
-        received_at=email.received_at,
     )
 
 
