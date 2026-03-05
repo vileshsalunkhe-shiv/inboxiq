@@ -231,7 +231,7 @@ async def get_email_body(
         logger.error(
             "email_body_fetch_failed",
             user_id=current_user.id,
-            email_id=email_id,
+            gmail_id=gmail_id,
             error_type=type(exc).__name__,
             error_message=str(exc),
             traceback=traceback.format_exc(),
