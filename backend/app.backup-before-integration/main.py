@@ -11,12 +11,9 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_limiter import FastAPILimiter
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
 from app.api import auth_router, auth_ios_router, digest_router, emails_router, sync_router, actions_router, categorization_router
-from app.api.auth_ios import limiter as auth_limiter
 
 # Try to import calendar router, but don't fail if it's missing
 calendar_router = None
@@ -43,17 +40,9 @@ def create_app() -> FastAPI:
         sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.environment, traces_sample_rate=0.1)
 
     app = FastAPI(title=settings.app_name)
-    # Register SlowAPI limiter for auth endpoints (rate limiting).
-    app.state.limiter = auth_limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "https://inboxiq-production-5368.up.railway.app",  # Production backend
-            "http://localhost:3000",  # Development frontend
-            "capacitor://localhost",  # iOS app (Capacitor)
-            "ionic://localhost",  # iOS app (Ionic)
-        ],
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

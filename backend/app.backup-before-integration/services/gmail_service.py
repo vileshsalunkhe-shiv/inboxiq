@@ -31,7 +31,7 @@ class GmailService:
         """List Gmail messages with optional search query and pagination."""
         service = await self.build_client(access_token)
         request = service.users().messages().list(
-            userId=settings.gmail_api_authenticated_user,  # "me" = authenticated user
+            userId=settings.gmail_api_user,
             q=query,
             pageToken=page_token,
             maxResults=max_results,
@@ -41,7 +41,7 @@ class GmailService:
     async def get_message(self, access_token: str, message_id: str) -> dict:
         """Fetch a Gmail message by ID."""
         service = await self.build_client(access_token)
-        request = service.users().messages().get(userId=settings.gmail_api_authenticated_user, id=message_id, format="metadata")
+        request = service.users().messages().get(userId=settings.gmail_api_user, id=message_id, format="metadata")
         return await asyncio.to_thread(request.execute)
 
     async def get_messages_batch(self, access_token: str, message_ids: list[str]) -> list[dict]:
@@ -73,7 +73,7 @@ class GmailService:
             for msg_id in message_ids:
                 batch.add(
                     service.users().messages().get(
-                        userId=settings.gmail_api_authenticated_user,
+                        userId=settings.gmail_api_user,
                         id=msg_id,
                         format="metadata"
                     ),
@@ -98,7 +98,7 @@ class GmailService:
         """Retrieve history changes since historyId."""
         service = await self.build_client(access_token)
         request = service.users().history().list(
-            userId=settings.gmail_api_authenticated_user,
+            userId=settings.gmail_api_user,
             startHistoryId=start_history_id,
             pageToken=page_token,
             historyTypes=["messageAdded"],
@@ -109,32 +109,32 @@ class GmailService:
         """Send an email via Gmail API."""
         service = await self.build_client(access_token)
         body = {"raw": base64.urlsafe_b64encode(raw_message).decode()}
-        request = service.users().messages().send(userId=settings.gmail_api_authenticated_user, body=body)
+        request = service.users().messages().send(userId=settings.gmail_api_user, body=body)
         return await asyncio.to_thread(request.execute)
 
     async def archive_message(self, access_token: str, message_id: str) -> dict:
         """Archive a message (remove INBOX label)."""
         service = await self.build_client(access_token)
         body = {"removeLabelIds": ["INBOX"]}
-        request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
         return await asyncio.to_thread(request.execute)
 
     async def delete_message(self, access_token: str, message_id: str) -> None:
         """Delete a message (move to trash)."""
         service = await self.build_client(access_token)
-        request = service.users().messages().trash(userId=settings.gmail_api_authenticated_user, id=message_id)
+        request = service.users().messages().trash(userId=settings.gmail_api_user, id=message_id)
         await asyncio.to_thread(request.execute)
 
     async def mark_as_read(self, access_token: str, message_id: str) -> dict:
         """Mark a message as read (remove UNREAD label)."""
         service = await self.build_client(access_token)
         body = {"removeLabelIds": ["UNREAD"]}
-        request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
         return await asyncio.to_thread(request.execute)
 
     async def mark_as_unread(self, access_token: str, message_id: str) -> dict:
         """Mark a message as unread (add UNREAD label)."""
         service = await self.build_client(access_token)
         body = {"addLabelIds": ["UNREAD"]}
-        request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
+        request = service.users().messages().modify(userId=settings.gmail_api_user, id=message_id, body=body)
         return await asyncio.to_thread(request.execute)

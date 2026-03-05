@@ -59,9 +59,7 @@ class Settings(BaseSettings):
     claude_api_key: str = Field(default="", alias="CLAUDE_API_KEY")
 
     # Gmail API
-    # "me" explicitly refers to the authenticated user
     gmail_api_user: str = Field(default="me", alias="GMAIL_API_USER")
-    gmail_api_authenticated_user: str = Field(default="me", alias="GMAIL_API_AUTHENTICATED_USER")
 
     # Digest
     default_digest_frequency_hours: int = Field(default=12, alias="DEFAULT_DIGEST_FREQUENCY_HOURS")

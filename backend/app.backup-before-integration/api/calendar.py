@@ -15,13 +15,9 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel
-import redis.asyncio as redis
-from googleapiclient.errors import HttpError
 
 from app.api.deps import get_current_user
-from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.services.calendar_service import calendar_service
@@ -47,26 +43,6 @@ def decode_state(state: str) -> dict:
     except Exception as e:
         logger.error(f"Failed to decode state: {e}")
         raise HTTPException(status_code=400, detail="Invalid state parameter")
-
-
-async def store_csrf_token(user_id: uuid.UUID, csrf_token: str) -> None:
-    """Store CSRF token in Redis for later validation."""
-    redis_client = redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
-    key = f"calendar:csrf:{user_id}"
-    await redis_client.set(key, csrf_token, ex=600)  # 10 minute expiry
-    await redis_client.close()
-
-
-async def validate_csrf_token(user_id: uuid.UUID, csrf_token: str) -> None:
-    """Validate CSRF token stored in Redis."""
-    redis_client = redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
-    key = f"calendar:csrf:{user_id}"
-    stored = await redis_client.get(key)
-    if not stored or stored != csrf_token:
-        await redis_client.close()
-        raise HTTPException(status_code=400, detail="Invalid CSRF token")
-    await redis_client.delete(key)
-    await redis_client.close()
 
 
 # Pydantic models
@@ -129,9 +105,6 @@ async def initiate_calendar_auth(
         # Encode user_id and CSRF token into state
         state = encode_state(user_id, csrf_token)
         
-        # Store CSRF token for validation in callback
-        await store_csrf_token(user_id, csrf_token)
-
         # Get authorization URL
         auth_url = calendar_service.get_authorization_url(state)
         
@@ -142,14 +115,9 @@ async def initiate_calendar_auth(
             "state": state
         }
     
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to initiate calendar auth: {e}")
-        raise HTTPException(status_code=500, detail="Database error") from e
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to initiate calendar auth: {e}")
-        raise HTTPException(status_code=500, detail="Calendar auth initiation failed") from e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/callback")
@@ -167,10 +135,7 @@ async def calendar_auth_callback(
         # Decode state to get user_id and verify CSRF
         state_data = decode_state(state)
         user_id = uuid.UUID(state_data["user_id"])
-        csrf_token = state_data.get("csrf")
-        if not csrf_token:
-            raise HTTPException(status_code=400, detail="Missing CSRF token")
-        await validate_csrf_token(user_id, csrf_token)
+        # csrf_token = state_data["csrf"]  # TODO: Verify CSRF token
         
         # Verify user exists
         result = await db.execute(select(User).where(User.id == user_id))
@@ -210,17 +175,9 @@ async def calendar_auth_callback(
             "token_expiry": user.calendar_token_expiry.isoformat() if user.calendar_token_expiry else None
         }
     
-    except HttpError as e:
-        logger.error(f"Calendar auth callback failed: {e}")
-        raise HTTPException(status_code=502, detail="Google Calendar OAuth failed") from e
-    except SQLAlchemyError as e:
-        logger.error(f"Calendar auth callback failed: {e}")
-        raise HTTPException(status_code=500, detail="Database error") from e
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Calendar auth callback failed: {e}")
-        raise HTTPException(status_code=500, detail="Calendar auth callback failed") from e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/events", response_model=List[CalendarEvent])
@@ -269,15 +226,9 @@ async def list_calendar_events(
     
     except HTTPException:
         raise
-    except HttpError as e:
-        logger.error(f"Failed to list events: {e}")
-        raise HTTPException(status_code=502, detail="Google Calendar API error") from e
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to list events: {e}")
-        raise HTTPException(status_code=500, detail="Database error") from e
     except Exception as e:
         logger.error(f"Failed to list events: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list calendar events") from e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/events", response_model=CalendarEvent)
@@ -320,15 +271,9 @@ async def create_calendar_event(
     
     except HTTPException:
         raise
-    except HttpError as e:
-        logger.error(f"Failed to create event: {e}")
-        raise HTTPException(status_code=502, detail="Google Calendar API error") from e
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to create event: {e}")
-        raise HTTPException(status_code=500, detail="Database error") from e
     except Exception as e:
         logger.error(f"Failed to create event: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create calendar event") from e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status")
@@ -362,9 +307,6 @@ async def calendar_connection_status(
     
     except HTTPException:
         raise
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to check calendar status: {e}")
-        raise HTTPException(status_code=500, detail="Database error") from e
     except Exception as e:
         logger.error(f"Failed to check calendar status: {e}")
-        raise HTTPException(status_code=500, detail="Failed to check calendar status") from e
+        raise HTTPException(status_code=500, detail=str(e))

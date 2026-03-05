@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import RedirectResponse
-from fastapi_limiter.depends import RateLimiter
 from urllib.parse import urlencode
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.deps import get_current_user
 from app.database import get_db
 from app.models import User
+from app.models.digest_settings import DigestSettings
 from app.schemas.auth import GoogleAuthRequest, GoogleCallbackRequest, RefreshRequest, TokenPair
 from app.services.auth_service import AuthService
 from pydantic import BaseModel
@@ -66,7 +65,24 @@ async def google_callback(code: str, db: AsyncSession = Depends(get_db)):
             params = urlencode({"error": "missing_email"})
             return RedirectResponse(url=f"inboxiq://oauth/callback?{params}")
 
-        user = await auth_service.get_or_create_user(email)
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(email=email)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            
+            digest_settings = DigestSettings(
+                user_id=user.id,
+                enabled=True,
+                frequency_hours=24,
+                timezone="America/Chicago",
+                include_action_items=True,
+                include_summaries=True
+            )
+            db.add(digest_settings)
+            await db.commit()
 
         if tokens.get("refresh_token"):
             await auth_service.store_google_tokens(user, tokens)
@@ -81,22 +97,12 @@ async def google_callback(code: str, db: AsyncSession = Depends(get_db)):
         })
         return RedirectResponse(url=f"inboxiq://oauth/callback?{params}")
         
-    except httpx.HTTPStatusError as exc:
-        params = urlencode({"error": "oauth_failed"})
-        return RedirectResponse(url=f"inboxiq://oauth/callback?{params}")
-    except SQLAlchemyError:
-        params = urlencode({"error": "db_error"})
-        return RedirectResponse(url=f"inboxiq://oauth/callback?{params}")
-    except Exception:
-        params = urlencode({"error": "auth_failed"})
+    except Exception as e:
+        params = urlencode({"error": str(e)[:100]})
         return RedirectResponse(url=f"inboxiq://oauth/callback?{params}")
 
 
-@router.post(
-    "/login",
-    response_model=LoginResponse,
-    dependencies=[Depends(RateLimiter(times=5, minutes=1))],
-)
+@router.post("/login", response_model=LoginResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> LoginResponse:
     """iOS-compatible login endpoint that exchanges OAuth code for tokens."""
     from app.config import settings
@@ -123,7 +129,25 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> Lo
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing email")
 
     # Find or create user
-    user = await auth_service.get_or_create_user(email)
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if not user:
+        user = User(email=email)
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        
+        # Create default digest settings
+        digest_settings = DigestSettings(
+            user_id=user.id,
+            enabled=True,
+            frequency_hours=24,
+            timezone="America/Chicago",
+            include_action_items=True,
+            include_summaries=True
+        )
+        db.add(digest_settings)
+        await db.commit()
 
     # Store Google tokens
     if tokens.get("refresh_token"):
@@ -139,11 +163,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> Lo
     )
 
 
-@router.post(
-    "/refresh",
-    response_model=TokenPair,
-    dependencies=[Depends(RateLimiter(times=5, minutes=1))],
-)
+@router.post("/refresh", response_model=TokenPair)
 async def refresh_tokens(payload: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenPair:
     """Rotate refresh token and issue new token pair."""
     auth_service = AuthService(db)
@@ -156,14 +176,23 @@ async def refresh_tokens(payload: RefreshRequest, db: AsyncSession = Depends(get
 
 @router.post("/logout")
 async def logout(
-    current_user: User = Depends(get_current_user),
+    authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Revoke refresh tokens for a user (simple logout)."""
-    # current_user is validated by get_current_user (valid, non-expired token)
-    from app.models import RefreshToken
-    await db.execute(
-        RefreshToken.__table__.update().where(RefreshToken.user_id == current_user.id).values(revoked=True)
-    )
-    await db.commit()
+    if not authorization:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
+    token = authorization.replace("Bearer ", "")
+    auth_service = AuthService(db)
+    try:
+        payload = auth_service.decode_token(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    user_id = payload.get("sub")
+    if user_id:
+        from app.models import RefreshToken
+        await db.execute(
+            RefreshToken.__table__.update().where(RefreshToken.user_id == user_id).values(revoked=True)
+        )
+        await db.commit()
     return {"status": "ok"}

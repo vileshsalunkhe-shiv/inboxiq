@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import RefreshToken, User
-from app.models.digest_settings import DigestSettings
 from app.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -36,40 +35,6 @@ class AuthService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-
-    async def get_or_create_user(self, email: str) -> User:
-        """Get existing user or create new one with default digest settings."""
-        result = await self.db.execute(select(User).where(User.email == email))
-        user = result.scalar_one_or_none()
-        if not user:
-            user = User(email=email)
-            self.db.add(user)
-            await self.db.flush()
-            digest_settings = DigestSettings(
-                user_id=user.id,
-                enabled=True,
-                frequency_hours=settings.default_digest_frequency_hours,
-                timezone="America/Chicago",
-                include_action_items=True,
-                include_summaries=True,
-            )
-            self.db.add(digest_settings)
-            await self.db.commit()
-            await self.db.refresh(user)
-        else:
-            # Ensure digest settings exist for legacy users
-            if not user.digest_settings:
-                digest_settings = DigestSettings(
-                    user_id=user.id,
-                    enabled=True,
-                    frequency_hours=settings.default_digest_frequency_hours,
-                    timezone="America/Chicago",
-                    include_action_items=True,
-                    include_summaries=True,
-                )
-                self.db.add(digest_settings)
-                await self.db.commit()
-        return user
 
     def build_google_auth_url(self, redirect_uri: Optional[str] = None) -> str:
         """Generate Google OAuth authorization URL."""
@@ -99,13 +64,17 @@ class AuthService:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(GOOGLE_OAUTH_TOKEN_URL, data=data)
             if response.status_code != 200:
-                # Log sanitized error metadata only (avoid leaking token details)
+                # Log the full error response from Google
+                error_detail = response.text
                 import structlog
                 logger = structlog.get_logger()
                 logger.error(
                     "google_oauth_token_exchange_failed",
                     status_code=response.status_code,
-                    error_type=response.__class__.__name__,
+                    error_detail=error_detail,
+                    client_id_prefix=data['client_id'][:20],
+                    redirect_uri=data['redirect_uri'],
+                    code_prefix=data['code'][:20] if data['code'] else None,
                 )
             response.raise_for_status()
             return response.json()
@@ -153,20 +122,6 @@ class AuthService:
         token_row.revoked = True
         await self.db.commit()
         return await self.create_token_pair(user_id)
-
-    async def revoke_refresh_token(self, user_id: str) -> None:
-        """Revoke all active refresh tokens for a user during logout."""
-        stmt = select(RefreshToken).where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.revoked.is_(False),
-        )
-        result = await self.db.execute(stmt)
-        tokens = result.scalars().all()
-        if not tokens:
-            return
-        for token_row in tokens:
-            token_row.revoked = True
-        await self.db.commit()
 
     def decode_token(self, token: str) -> dict:
         """Decode a JWT token."""

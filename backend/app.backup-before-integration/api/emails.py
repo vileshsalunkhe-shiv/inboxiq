@@ -80,28 +80,31 @@ async def list_emails(
     next_page_token = data.get("nextPageToken")
 
     emails_by_gmail_id: dict[str, Email] = {}
-    new_emails: list[Email] = []
     if message_ids:
-        # Fetch Gmail messages first (reduces DB queries to a single lookup)
-        messages = await gmail_service.get_messages_batch(access_token, message_ids)
-
         existing_stmt = select(Email).where(
             Email.user_id == current_user.id,
             Email.gmail_id.in_(message_ids),
         )
         existing_result = await db.execute(existing_stmt)
         existing_emails = existing_result.scalars().all()
-        existing_ids = {e.gmail_id for e in existing_emails}
         emails_by_gmail_id = {e.gmail_id: e for e in existing_emails}
 
+    # Identify which messages are new (not in database)
+    new_message_ids = [mid for mid in message_ids if mid not in emails_by_gmail_id]
+    
+    # Fetch all new messages in a single batch request (fixes N+1 problem)
+    new_emails: list[Email] = []
+    if new_message_ids:
+        messages = await gmail_service.get_messages_batch(access_token, new_message_ids)
+        
         for message in messages:
             if not message:  # Skip None results from batch errors
                 continue
-
+            
             message_id = message.get("id")
-            if not message_id or message_id in existing_ids:
+            if not message_id or message_id in emails_by_gmail_id:
                 continue
-
+            
             headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
             subject = headers.get("subject")
             sender = headers.get("from")
