@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text, Time
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,11 @@ class User(Base):
     calendar_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     calendar_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     calendar_token_expiry: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    
+    # Daily digest preferences
+    digest_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    digest_time: Mapped[time] = mapped_column(Time, default=time(7, 0), nullable=False)
+    last_digest_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
