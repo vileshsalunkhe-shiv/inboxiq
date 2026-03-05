@@ -127,7 +127,8 @@ class SyncService:
 
     async def _fetch_initial_message_ids(self, access_token: str, limit: int = 30) -> list[str]:
         # Default 30 (reduced from 50), configurable for delta fallback
-        data = await self.gmail.list_messages(access_token, query="newer_than:7d", max_results=limit)
+        # Exclude sent emails from inbox sync
+        data = await self.gmail.list_messages(access_token, query="newer_than:7d -in:sent", max_results=limit)
         return [msg["id"] for msg in data.get("messages", [])]
 
     async def _fetch_delta_message_ids(self, access_token: str, history_id: str) -> list[str]:
