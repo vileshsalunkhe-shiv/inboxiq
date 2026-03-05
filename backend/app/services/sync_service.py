@@ -48,10 +48,10 @@ class SyncService:
             
             # Fallback: If delta returns few/no results, also fetch recent emails
             # This handles cases where Gmail's history API misses recent messages
-            # Only fetch 20 most recent to avoid rate limits
+            # Only fetch 10 most recent to avoid rate limits
             if len(message_ids) < 5:
                 logger.info("sync_delta_fallback", user_id=user_id, delta_count=len(message_ids))
-                recent_ids = await self._fetch_initial_message_ids(access_token, limit=20)
+                recent_ids = await self._fetch_initial_message_ids(access_token, limit=10)
                 # Merge unique IDs (set removes duplicates)
                 message_ids = list(set(message_ids + recent_ids))
                 logger.info("sync_after_fallback", user_id=user_id, total_count=len(message_ids))
@@ -62,25 +62,54 @@ class SyncService:
         logger.info("sync_message_ids_found", user_id=user_id, count=len(message_ids))
 
         # Use Gmail's batch API to fetch multiple messages in single requests
+        # Reduced batch size to avoid rate limits
         created = 0
-        batch_size = 50  # Gmail batch API can handle up to 100, use 50 to be safe
+        batch_size = 10  # Reduced from 50 to 10 to avoid 429 errors
         
         for i in range(0, len(message_ids), batch_size):
             batch_ids = message_ids[i:i + batch_size]
-            logger.info("sync_batch_api_fetching", batch_num=i//batch_size + 1, batch_size=len(batch_ids))
+            batch_num = i//batch_size + 1
+            logger.info("sync_batch_api_fetching", batch_num=batch_num, batch_size=len(batch_ids))
             
-            # Fetch all messages in this batch with ONE API call
-            messages = await self.gmail.get_messages_batch(access_token, batch_ids)
+            # Retry batch fetch with exponential backoff on rate limits
+            max_retries = 3
+            retry_delay = 2.0
+            messages = []
+            
+            for attempt in range(max_retries):
+                try:
+                    # Fetch all messages in this batch with ONE API call
+                    messages = await self.gmail.get_messages_batch(access_token, batch_ids)
+                    break  # Success
+                except Exception as e:
+                    if "429" in str(e) or "rateLimitExceeded" in str(e):
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                "batch_rate_limit_retry",
+                                batch_num=batch_num,
+                                attempt=attempt + 1,
+                                retry_delay=retry_delay
+                            )
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            logger.error("batch_rate_limit_max_retries", batch_num=batch_num)
+                            messages = []  # Skip this batch
+                            break
+                    else:
+                        logger.error("batch_fetch_error", batch_num=batch_num, error=str(e))
+                        messages = []
+                        break
             
             # Now upsert each message (this doesn't make API calls, just DB operations)
             for message in messages:
                 created += await self._upsert_email_from_data(user.id, message)
             
-            logger.info("sync_batch_completed", batch_num=i//batch_size + 1, created_in_batch=len(messages))
+            logger.info("sync_batch_completed", batch_num=batch_num, created_in_batch=len(messages))
             
-            # Small delay between batches
+            # Longer delay between batches to avoid rate limits
             if i + batch_size < len(message_ids):
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(3.0)  # Increased from 1.0 to 3.0 seconds
 
         if message_ids:
             user.last_history_id = await self._fetch_latest_history_id(access_token)
@@ -96,8 +125,8 @@ class SyncService:
             raise ValueError("User not found")
         return user
 
-    async def _fetch_initial_message_ids(self, access_token: str, limit: int = 50) -> list[str]:
-        # Default 50, configurable for delta fallback
+    async def _fetch_initial_message_ids(self, access_token: str, limit: int = 30) -> list[str]:
+        # Default 30 (reduced from 50), configurable for delta fallback
         data = await self.gmail.list_messages(access_token, query="newer_than:7d", max_results=limit)
         return [msg["id"] for msg in data.get("messages", [])]
 
