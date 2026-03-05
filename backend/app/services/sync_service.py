@@ -60,10 +60,20 @@ class SyncService:
 
         logger.info("sync_message_ids_found", user_id=user_id, count=len(message_ids))
 
+        # Process emails in batches to avoid rate limits
         created = 0
-        for message_id in message_ids:
-            created += await self._upsert_email(access_token, user.id, message_id)
-            await asyncio.sleep(0.5)  # Rate limiting: 500ms between emails to avoid Gmail 429
+        batch_size = 10  # Process 10 emails at a time
+        
+        for i in range(0, len(message_ids), batch_size):
+            batch = message_ids[i:i + batch_size]
+            logger.info("sync_batch_processing", batch_num=i//batch_size + 1, batch_size=len(batch))
+            
+            for message_id in batch:
+                created += await self._upsert_email(access_token, user.id, message_id)
+            
+            # Longer delay between batches (2 seconds) to respect rate limits
+            if i + batch_size < len(message_ids):
+                await asyncio.sleep(2.0)
 
         if message_ids:
             user.last_history_id = await self._fetch_latest_history_id(access_token)
