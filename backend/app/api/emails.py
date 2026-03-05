@@ -206,6 +206,7 @@ async def get_email_body(
     db: AsyncSession = Depends(get_db),
 ) -> EmailBodyOut:
     """Fetch full email body from Gmail API, with caching."""
+    print(f"🔍 EMAIL BODY REQUEST: gmail_id={gmail_id}, user_id={current_user.id}, user_email={current_user.email}")
     logger.info(
         "email_body_request",
         gmail_id=gmail_id,
@@ -229,6 +230,7 @@ async def get_email_body(
         total_emails = count_result.scalar_one()
         
         if any_email:
+            print(f"❌ USER MISMATCH: gmail_id={gmail_id}, requested_user={current_user.id}, email_user={any_email.user_id}, total_emails={total_emails}")
             logger.error(
                 "email_body_user_mismatch",
                 gmail_id=gmail_id,
@@ -237,7 +239,7 @@ async def get_email_body(
                 total_emails_for_user=total_emails,
             )
         else:
-            # Check if ANY emails exist for this user
+            print(f"❌ EMAIL NOT FOUND: gmail_id={gmail_id}, user_id={current_user.id}, total_emails_for_user={total_emails}")
             logger.error(
                 "email_body_not_found",
                 gmail_id=gmail_id,
