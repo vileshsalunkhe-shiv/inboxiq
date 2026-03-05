@@ -63,7 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_ios_router)
     app.include_router(emails_router)
     app.include_router(sync_router)
-    app.include_router(digest_router)
+    app.include_router(digest_router, prefix="/api")
     app.include_router(actions_router)
     app.include_router(categorization_router)
     
