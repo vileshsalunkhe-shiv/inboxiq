@@ -15,9 +15,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
-from app.api import auth_router, auth_ios_router, emails_router, sync_router, actions_router, categorization_router
-# Temporarily disabled until migration runs:
-# from app.api import digest_router
+from app.api import auth_router, auth_ios_router, digest_router, emails_router, sync_router, actions_router, categorization_router
 from app.api.auth_ios import limiter as auth_limiter
 
 # Try to import calendar router, but don't fail if it's missing
@@ -65,7 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_ios_router)
     app.include_router(emails_router)
     app.include_router(sync_router)
-    # app.include_router(digest_router)  # Temporarily disabled until migration runs
+    app.include_router(digest_router)
     app.include_router(actions_router)
     app.include_router(categorization_router)
     
