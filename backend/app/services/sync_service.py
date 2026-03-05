@@ -45,6 +45,15 @@ class SyncService:
         if history_id and has_emails:
             logger.info("sync_delta_mode", user_id=user_id, history_id=history_id)
             message_ids = await self._fetch_delta_message_ids(access_token, history_id)
+            
+            # Fallback: If delta returns few/no results, also fetch recent emails
+            # This handles cases where Gmail's history API misses recent messages
+            if len(message_ids) < 5:
+                logger.info("sync_delta_fallback", user_id=user_id, delta_count=len(message_ids))
+                recent_ids = await self._fetch_initial_message_ids(access_token)
+                # Merge unique IDs (set removes duplicates)
+                message_ids = list(set(message_ids + recent_ids))
+                logger.info("sync_after_fallback", user_id=user_id, total_count=len(message_ids))
         else:
             logger.info("sync_initial_mode", user_id=user_id, has_emails=has_emails, history_id=history_id)
             message_ids = await self._fetch_initial_message_ids(access_token)
@@ -71,8 +80,8 @@ class SyncService:
         return user
 
     async def _fetch_initial_message_ids(self, access_token: str) -> list[str]:
-        # Limit initial sync to 20 most recent emails to avoid rate limits
-        data = await self.gmail.list_messages(access_token, query="newer_than:7d", max_results=20)
+        # Increased from 20 to 100 for better initial state and delta fallback
+        data = await self.gmail.list_messages(access_token, query="newer_than:7d", max_results=100)
         return [msg["id"] for msg in data.get("messages", [])]
 
     async def _fetch_delta_message_ids(self, access_token: str, history_id: str) -> list[str]:
