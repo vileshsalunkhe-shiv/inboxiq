@@ -15,7 +15,7 @@ import structlog
 from app.api.deps import get_current_user
 from app.database import get_db
 from app.models import AIQueue, Email, User
-from app.schemas.email import EmailList, EmailOut
+from app.schemas.email import EmailBodyOut, EmailList, EmailOut
 from app.schemas.email_actions import (
     BulkActionRequest,
     BulkActionResponse,
@@ -196,6 +196,63 @@ async def get_email(
         category=email.category,
         ai_summary=email.ai_summary,
         ai_confidence=email.ai_confidence,
+    )
+
+
+@router.get("/{gmail_id}/body", response_model=EmailBodyOut)
+async def get_email_body(
+    gmail_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EmailBodyOut:
+    """Fetch full email body from Gmail API, with caching."""
+    stmt = select(Email).where(Email.gmail_id == gmail_id, Email.user_id == current_user.id)
+    result = await db.execute(stmt)
+    email = result.scalar_one_or_none()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+
+    if email.body_fetched_at and (email.body_text or email.body_html):
+        return EmailBodyOut(
+            email_id=str(email.id),
+            body_text=email.body_text,
+            body_html=email.body_html,
+            has_attachments=bool(email.has_attachments),
+            fetched_at=email.body_fetched_at,
+        )
+
+    auth_service = AuthService(db)
+    access_token = await auth_service.get_google_access_token(current_user)
+    gmail_service = GmailService()
+
+    try:
+        body_data = await gmail_service.get_email_body(access_token, email.gmail_id)
+    except Exception as exc:
+        logger.error(
+            "email_body_fetch_failed",
+            user_id=current_user.id,
+            email_id=email_id,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to fetch email body from Gmail",
+        )
+
+    email.body_text = body_data.get("text")
+    email.body_html = body_data.get("html")
+    email.has_attachments = body_data.get("has_attachments", False)
+    email.body_fetched_at = datetime.utcnow()
+    await db.commit()
+
+    return EmailBodyOut(
+        email_id=str(email.id),
+        body_text=email.body_text,
+        body_html=email.body_html,
+        has_attachments=bool(email.has_attachments),
+        fetched_at=email.body_fetched_at,
     )
 
 
