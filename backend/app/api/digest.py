@@ -7,8 +7,6 @@ from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -18,9 +16,6 @@ from app.schemas.digest import DigestSettingsIn, DigestSettingsOut
 from app.services.digest_service import DigestService
 
 logger = logging.getLogger(__name__)
-
-# Create limiter instance for this router
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/digest", tags=["digest"])
 
@@ -40,7 +35,6 @@ class DigestSendResponse(BaseModel):
 
 
 @router.get("/preview", response_model=DigestPreviewResponse)
-@limiter.limit("10/minute")
 async def preview_digest(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -67,7 +61,6 @@ async def preview_digest(
 
 
 @router.post("/send", response_model=DigestSendResponse)
-@limiter.limit("5/minute")
 async def send_digest(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -94,7 +87,6 @@ async def send_digest(
 
 
 @router.get("/settings", response_model=DigestSettingsOut)
-@limiter.limit("20/minute")
 async def get_digest_settings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -111,7 +103,6 @@ async def get_digest_settings(
 
 
 @router.put("/settings", response_model=DigestSettingsOut)
-@limiter.limit("20/minute")
 async def update_digest_settings(
     settings: DigestSettingsIn,
     current_user: User = Depends(get_current_user),
