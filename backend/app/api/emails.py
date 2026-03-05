@@ -206,26 +206,60 @@ async def get_email_body(
     db: AsyncSession = Depends(get_db),
 ) -> EmailBodyOut:
     """Fetch full email body from Gmail API, with caching."""
-    logger.info(f"🔍 Body request: gmail_id={gmail_id}, user_id={current_user.id}")
+    logger.info(
+        "email_body_request",
+        gmail_id=gmail_id,
+        user_id=str(current_user.id),
+        user_email=current_user.email,
+    )
     
     stmt = select(Email).where(Email.gmail_id == gmail_id, Email.user_id == current_user.id)
     result = await db.execute(stmt)
     email = result.scalar_one_or_none()
     
     if not email:
-        # Debug: Check if email exists for ANY user
+        # Detailed diagnostics
         any_user_stmt = select(Email).where(Email.gmail_id == gmail_id)
         any_result = await db.execute(any_user_stmt)
         any_email = any_result.scalar_one_or_none()
         
-        if any_email:
-            logger.error(f"❌ Email {gmail_id} exists but user_id mismatch: email.user_id={any_email.user_id} != current_user.id={current_user.id}")
-        else:
-            logger.error(f"❌ Email {gmail_id} not found in database at all")
+        # Count total emails for this user
+        count_stmt = select(func.count()).select_from(Email).where(Email.user_id == current_user.id)
+        count_result = await db.execute(count_stmt)
+        total_emails = count_result.scalar_one()
         
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+        if any_email:
+            logger.error(
+                "email_body_user_mismatch",
+                gmail_id=gmail_id,
+                requested_user_id=str(current_user.id),
+                email_user_id=str(any_email.user_id),
+                total_emails_for_user=total_emails,
+            )
+        else:
+            # Check if ANY emails exist for this user
+            logger.error(
+                "email_body_not_found",
+                gmail_id=gmail_id,
+                user_id=str(current_user.id),
+                total_emails_for_user=total_emails,
+                hint="Email may not have synced yet due to rate limiting",
+            )
+        
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Email not synced yet. Please refresh your inbox.",
+        )
 
+    # Check if body is already cached
     if email.body_fetched_at and (email.body_text or email.body_html):
+        logger.info(
+            "email_body_cache_hit",
+            gmail_id=gmail_id,
+            has_text=bool(email.body_text),
+            has_html=bool(email.body_html),
+            cached_at=email.body_fetched_at.isoformat() if email.body_fetched_at else None,
+        )
         return EmailBodyOut(
             email_id=str(email.id),
             body_text=email.body_text,
@@ -234,12 +268,22 @@ async def get_email_body(
             fetched_at=email.body_fetched_at,
         )
 
+    # Fetch from Gmail API
+    logger.info("email_body_fetching_from_gmail", gmail_id=gmail_id, email_subject=email.subject)
+    
     auth_service = AuthService(db)
     access_token = await auth_service.get_google_access_token(current_user)
     gmail_service = GmailService()
 
     try:
         body_data = await gmail_service.get_email_body(access_token, email.gmail_id)
+        logger.info(
+            "email_body_fetch_success",
+            gmail_id=gmail_id,
+            has_text=bool(body_data.get("text")),
+            has_html=bool(body_data.get("html")),
+            has_attachments=body_data.get("has_attachments", False),
+        )
     except Exception as exc:
         logger.error(
             "email_body_fetch_failed",
