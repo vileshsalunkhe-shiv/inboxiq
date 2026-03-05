@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+from email.message import EmailMessage
+from email.utils import formatdate
 from typing import Any
 
 import asyncio
@@ -38,10 +40,14 @@ class GmailService:
         )
         return await asyncio.to_thread(request.execute)
 
-    async def get_message(self, access_token: str, message_id: str) -> dict:
+    async def get_message(self, access_token: str, message_id: str, format: str = "metadata") -> dict:
         """Fetch a Gmail message by ID."""
         service = await self.build_client(access_token)
-        request = service.users().messages().get(userId=settings.gmail_api_authenticated_user, id=message_id, format="metadata")
+        request = service.users().messages().get(
+            userId=settings.gmail_api_authenticated_user,
+            id=message_id,
+            format=format,
+        )
         return await asyncio.to_thread(request.execute)
 
     async def get_messages_batch(self, access_token: str, message_ids: list[str]) -> list[dict]:
@@ -105,10 +111,121 @@ class GmailService:
         )
         return await asyncio.to_thread(request.execute)
 
-    async def send_message(self, access_token: str, raw_message: bytes) -> dict:
+    def build_email_message(
+        self,
+        from_email: str,
+        to: list[str],
+        subject: str,
+        body: str,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        attachments: list[dict[str, str]] | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+    ) -> bytes:
+        """Build a raw RFC 2822 email message."""
+        message = EmailMessage()
+        message["From"] = from_email
+        message["To"] = ", ".join(to)
+        message["Subject"] = subject
+        message["Date"] = formatdate(localtime=True)
+        if cc:
+            message["Cc"] = ", ".join(cc)
+        if bcc:
+            message["Bcc"] = ", ".join(bcc)
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+        if references:
+            message["References"] = references
+
+        message.set_content(body or "")
+
+        if attachments:
+            for attachment in attachments:
+                filename = attachment.get("filename")
+                content_type = attachment.get("content_type", "application/octet-stream")
+                data = attachment.get("data", "")
+                maintype, subtype = content_type.split("/", 1) if "/" in content_type else (content_type, "octet-stream")
+                message.add_attachment(
+                    base64.b64decode(data),
+                    maintype=maintype,
+                    subtype=subtype,
+                    filename=filename,
+                )
+
+        return message.as_bytes()
+
+    def _decode_body_data(self, data: str | None) -> str | None:
+        if not data:
+            return None
+        padding = "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode((data + padding).encode()).decode("utf-8", errors="replace")
+
+    def extract_plain_text(self, payload: dict) -> str | None:
+        """Extract plain text from a Gmail message payload."""
+        mime_type = payload.get("mimeType")
+        body = payload.get("body", {})
+        data = body.get("data")
+        if mime_type == "text/plain" and data:
+            return base64.urlsafe_b64decode(data.encode()).decode("utf-8", errors="replace")
+
+        for part in payload.get("parts", []) or []:
+            text = self.extract_plain_text(part)
+            if text:
+                return text
+
+        return None
+
+    def extract_body_parts(self, payload: dict) -> tuple[str | None, str | None, bool]:
+        """Extract text/plain and text/html parts, plus attachment indicator."""
+        text: str | None = None
+        html: str | None = None
+        has_attachments = False
+
+        parts = [payload]
+        while parts:
+            part = parts.pop(0)
+            mime_type = part.get("mimeType")
+            body = part.get("body", {})
+            data = body.get("data")
+
+            filename = part.get("filename")
+            if filename and body.get("attachmentId"):
+                has_attachments = True
+
+            if mime_type == "text/plain" and data and text is None:
+                text = self._decode_body_data(data)
+            elif mime_type == "text/html" and data and html is None:
+                html = self._decode_body_data(data)
+
+            for subpart in part.get("parts", []) or []:
+                parts.append(subpart)
+
+        return text, html, has_attachments
+
+    async def get_email_body(self, access_token: str, message_id: str) -> dict:
+        """Fetch full Gmail message body (text + html) and attachment indicator."""
+        service = await self.build_client(access_token)
+        request = service.users().messages().get(
+            userId=settings.gmail_api_authenticated_user,
+            id=message_id,
+            format="full",
+        )
+        message = await asyncio.to_thread(request.execute)
+        payload = message.get("payload", {}) or {}
+        text, html, has_attachments = self.extract_body_parts(payload)
+        return {
+            "text": text,
+            "html": html,
+            "has_attachments": has_attachments,
+        }
+
+    async def send_message(self, access_token: str, raw_message: bytes, thread_id: str | None = None) -> dict:
         """Send an email via Gmail API."""
         service = await self.build_client(access_token)
-        body = {"raw": base64.urlsafe_b64encode(raw_message).decode()}
+        body: dict[str, Any] = {"raw": base64.urlsafe_b64encode(raw_message).decode()}
+        if thread_id:
+            body["threadId"] = thread_id
         request = service.users().messages().send(userId=settings.gmail_api_authenticated_user, body=body)
         return await asyncio.to_thread(request.execute)
 
@@ -136,5 +253,19 @@ class GmailService:
         """Mark a message as unread (add UNREAD label)."""
         service = await self.build_client(access_token)
         body = {"addLabelIds": ["UNREAD"]}
+        request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
+        return await asyncio.to_thread(request.execute)
+
+    async def add_star(self, access_token: str, message_id: str) -> dict:
+        """Star a message (add STARRED label)."""
+        service = await self.build_client(access_token)
+        body = {"addLabelIds": ["STARRED"]}
+        request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
+        return await asyncio.to_thread(request.execute)
+
+    async def remove_star(self, access_token: str, message_id: str) -> dict:
+        """Unstar a message (remove STARRED label)."""
+        service = await self.build_client(access_token)
+        body = {"removeLabelIds": ["STARRED"]}
         request = service.users().messages().modify(userId=settings.gmail_api_authenticated_user, id=message_id, body=body)
         return await asyncio.to_thread(request.execute)

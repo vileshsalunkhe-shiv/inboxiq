@@ -22,6 +22,19 @@ class EmailOut(BaseModel):
     ai_confidence: float | None = None
 
 
+class EmailBodyOut(BaseModel):
+    """Full email body response."""
+
+    email_id: str
+    body_text: str | None = None
+    body_html: str | None = None
+    has_attachments: bool
+    fetched_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class EmailList(BaseModel):
     """Paginated email list (Gmail pageToken based)."""
 
