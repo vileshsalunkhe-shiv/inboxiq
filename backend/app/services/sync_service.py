@@ -60,20 +60,26 @@ class SyncService:
 
         logger.info("sync_message_ids_found", user_id=user_id, count=len(message_ids))
 
-        # Process emails in batches to avoid rate limits
+        # Use Gmail's batch API to fetch multiple messages in single requests
         created = 0
-        batch_size = 10  # Process 10 emails at a time
+        batch_size = 50  # Gmail batch API can handle up to 100, use 50 to be safe
         
         for i in range(0, len(message_ids), batch_size):
-            batch = message_ids[i:i + batch_size]
-            logger.info("sync_batch_processing", batch_num=i//batch_size + 1, batch_size=len(batch))
+            batch_ids = message_ids[i:i + batch_size]
+            logger.info("sync_batch_api_fetching", batch_num=i//batch_size + 1, batch_size=len(batch_ids))
             
-            for message_id in batch:
-                created += await self._upsert_email(access_token, user.id, message_id)
+            # Fetch all messages in this batch with ONE API call
+            messages = await self.gmail.get_messages_batch(access_token, batch_ids)
             
-            # Longer delay between batches (2 seconds) to respect rate limits
+            # Now upsert each message (this doesn't make API calls, just DB operations)
+            for message in messages:
+                created += await self._upsert_email_from_data(user.id, message)
+            
+            logger.info("sync_batch_completed", batch_num=i//batch_size + 1, created_in_batch=len(messages))
+            
+            # Small delay between batches
             if i + batch_size < len(message_ids):
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(1.0)
 
         if message_ids:
             user.last_history_id = await self._fetch_latest_history_id(access_token)
@@ -174,4 +180,41 @@ class SyncService:
         await self.db.commit()
 
         logger.info("email_synced", user_id=user_id, gmail_id=message_id)
+        return 1
+
+    async def _upsert_email_from_data(self, user_id: str, message: dict) -> int:
+        """Upsert email from pre-fetched message data (from batch API)."""
+        message_id = message.get("id")
+        if not message_id:
+            return 0
+            
+        # Check if already exists
+        result = await self.db.execute(select(Email).where(Email.gmail_id == message_id))
+        if result.scalar_one_or_none():
+            return 0
+
+        # Parse message data
+        headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
+        subject = headers.get("subject")
+        sender = headers.get("from")
+        snippet = message.get("snippet")
+        internal_date = message.get("internalDate")
+        received_at = datetime.utcfromtimestamp(int(internal_date) / 1000) if internal_date else None
+
+        # Create email record
+        email = Email(
+            user_id=user_id,
+            gmail_id=message_id,
+            subject=subject,
+            sender=sender,
+            snippet=snippet,
+            received_at=received_at,
+        )
+        self.db.add(email)
+        await self.db.flush()
+        await self.db.refresh(email)
+        self.db.add(AIQueue(email_id=email.id))
+        await self.db.commit()
+
+        logger.info("email_synced_from_batch", user_id=user_id, gmail_id=message_id)
         return 1
