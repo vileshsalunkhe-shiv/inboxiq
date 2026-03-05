@@ -19,3 +19,9 @@ class DigestSettingsOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DigestSendResponse(BaseModel):
+    message_id: str
+    sent_at: str
+    recipient: str
