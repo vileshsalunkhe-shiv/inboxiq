@@ -9,6 +9,7 @@ import httpx
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.models import RefreshToken, User
@@ -39,12 +40,17 @@ class AuthService:
 
     async def get_or_create_user(self, email: str) -> User:
         """Get existing user or create new one with default digest settings."""
-        result = await self.db.execute(select(User).where(User.email == email))
+        result = await self.db.execute(
+            select(User)
+            .where(User.email == email)
+            .options(selectinload(User.digest_settings))
+        )
         user = result.scalar_one_or_none()
         if not user:
             user = User(email=email)
             self.db.add(user)
             await self.db.flush()
+            await self.db.refresh(user)  # ✅ Refresh to get database-generated ID
             digest_settings = DigestSettings(
                 user_id=user.id,
                 enabled=True,

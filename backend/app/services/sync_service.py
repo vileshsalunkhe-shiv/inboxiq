@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AIQueue, Email, User
@@ -34,18 +34,27 @@ class SyncService:
         access_payload = await self.auth.refresh_google_access_token(user.google_refresh_token)
         access_token = access_payload["access_token"]
 
+        # Check if user has ANY emails - if not, do initial sync even if history_id exists
+        email_count_stmt = select(func.count()).select_from(Email).where(Email.user_id == user.id)
+        email_count_result = await self.db.execute(email_count_stmt)
+        has_emails = email_count_result.scalar_one() > 0
+
         message_ids: list[str] = []
         history_id = user.last_history_id
 
-        if history_id:
+        if history_id and has_emails:
+            logger.info("sync_delta_mode", user_id=user_id, history_id=history_id)
             message_ids = await self._fetch_delta_message_ids(access_token, history_id)
         else:
+            logger.info("sync_initial_mode", user_id=user_id, has_emails=has_emails, history_id=history_id)
             message_ids = await self._fetch_initial_message_ids(access_token)
+
+        logger.info("sync_message_ids_found", user_id=user_id, count=len(message_ids))
 
         created = 0
         for message_id in message_ids:
             created += await self._upsert_email(access_token, user.id, message_id)
-            await asyncio.sleep(0.05)  # rate limiting
+            await asyncio.sleep(0.5)  # Rate limiting: 500ms between emails to avoid Gmail 429
 
         if message_ids:
             user.last_history_id = await self._fetch_latest_history_id(access_token)
@@ -62,7 +71,8 @@ class SyncService:
         return user
 
     async def _fetch_initial_message_ids(self, access_token: str) -> list[str]:
-        data = await self.gmail.list_messages(access_token, query="newer_than:7d")
+        # Limit initial sync to 20 most recent emails to avoid rate limits
+        data = await self.gmail.list_messages(access_token, query="newer_than:7d", max_results=20)
         return [msg["id"] for msg in data.get("messages", [])]
 
     async def _fetch_delta_message_ids(self, access_token: str, history_id: str) -> list[str]:
@@ -90,15 +100,39 @@ class SyncService:
         if result.scalar_one_or_none():
             return 0
 
-        try:
-            message = await self.gmail.get_message(access_token, message_id)
-        except Exception as e:
-            # Skip deleted/missing emails (404 errors) gracefully
-            if "404" in str(e) or "not found" in str(e).lower():
-                logger.warning("email_not_found_skipping", message_id=message_id, error=str(e))
-                return 0
-            # Re-raise other errors
-            raise
+        # Retry logic with exponential backoff for rate limits
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                message = await self.gmail.get_message(access_token, message_id)
+                break  # Success - exit retry loop
+            except Exception as e:
+                # Skip deleted/missing emails (404 errors) gracefully
+                if "404" in str(e) or "not found" in str(e).lower():
+                    logger.warning("email_not_found_skipping", message_id=message_id, error=str(e))
+                    return 0
+                
+                # Handle rate limit (429) with exponential backoff
+                if "429" in str(e) or "rateLimitExceeded" in str(e):
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "rate_limit_retry",
+                            message_id=message_id,
+                            attempt=attempt + 1,
+                            retry_delay=retry_delay
+                        )
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        # Max retries reached - skip this email
+                        logger.error("rate_limit_max_retries", message_id=message_id)
+                        return 0
+                
+                # Re-raise other errors
+                raise
         headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
         subject = headers.get("subject")
         sender = headers.get("from")
@@ -116,6 +150,7 @@ class SyncService:
         )
         self.db.add(email)
         await self.db.flush()
+        await self.db.refresh(email)  # ✅ Refresh to get database-generated ID
         self.db.add(AIQueue(email_id=email.id))
         await self.db.commit()
 
