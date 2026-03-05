@@ -206,10 +206,23 @@ async def get_email_body(
     db: AsyncSession = Depends(get_db),
 ) -> EmailBodyOut:
     """Fetch full email body from Gmail API, with caching."""
+    logger.info(f"🔍 Body request: gmail_id={gmail_id}, user_id={current_user.id}")
+    
     stmt = select(Email).where(Email.gmail_id == gmail_id, Email.user_id == current_user.id)
     result = await db.execute(stmt)
     email = result.scalar_one_or_none()
+    
     if not email:
+        # Debug: Check if email exists for ANY user
+        any_user_stmt = select(Email).where(Email.gmail_id == gmail_id)
+        any_result = await db.execute(any_user_stmt)
+        any_email = any_result.scalar_one_or_none()
+        
+        if any_email:
+            logger.error(f"❌ Email {gmail_id} exists but user_id mismatch: email.user_id={any_email.user_id} != current_user.id={current_user.id}")
+        else:
+            logger.error(f"❌ Email {gmail_id} not found in database at all")
+        
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
 
     if email.body_fetched_at and (email.body_text or email.body_html):
