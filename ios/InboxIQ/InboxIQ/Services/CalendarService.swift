@@ -36,10 +36,15 @@ final class CalendarService {
     }
 
     func initiateAuth(userId: UUID) async throws -> CalendarAuthInitiateResponse {
-        var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarAuthInitiate), resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarAuthInitiate), resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
         components.queryItems = [URLQueryItem(name: "user_id", value: userId.uuidString)]
         
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         if let token = KeychainService.shared.getAccessToken() {
             request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -50,15 +55,39 @@ final class CalendarService {
     }
 
     func handleCallback(code: String, state: String) async throws -> CalendarCallbackResponse {
-        let path = "\(APIPath.calendarCallback)?code=\(code)&state=\(state)"
-        return try await APIClient.shared.request(path)
+        // FIX: Use URLComponents instead of string concatenation
+        // OLD: let path = "\(APIPath.calendarCallback)?code=\(code)&state=\(state)"
+        guard var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarCallback), resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [
+            URLQueryItem(name: "code", value: code),
+            URLQueryItem(name: "state", value: state)
+        ]
+        
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if let token = KeychainService.shared.getAccessToken() {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try JSONDecoder().decode(CalendarCallbackResponse.self, from: data)
     }
 
     func checkStatus(userId: UUID) async throws -> CalendarStatusResponse {
-        var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarStatus), resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarStatus), resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
         components.queryItems = [URLQueryItem(name: "user_id", value: userId.uuidString)]
         
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         if let token = KeychainService.shared.getAccessToken() {
             request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -69,13 +98,57 @@ final class CalendarService {
     }
 
     func fetchEvents(userId: UUID, maxResults: Int = 10) async throws -> [CalendarEventPayload] {
-        let path = "\(APIPath.calendarEvents)?user_id=\(userId.uuidString)&max_results=\(maxResults)"
-        return try await APIClient.shared.request(path)
+        // FIX: Use URLComponents instead of string concatenation
+        // OLD: let path = "\(APIPath.calendarEvents)?user_id=\(userId.uuidString)&max_results=\(maxResults)"
+        guard var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarEvents), resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [
+            URLQueryItem(name: "user_id", value: userId.uuidString),
+            URLQueryItem(name: "max_results", value: "\(maxResults)")
+        ]
+        
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if let token = KeychainService.shared.getAccessToken() {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([CalendarEventPayload].self, from: data)
     }
 
     func createEvent(userId: UUID, request: CalendarEventCreateRequest) async throws -> CalendarEventPayload {
-        let path = "\(APIPath.calendarEvents)?user_id=\(userId.uuidString)"
-        return try await APIClient.shared.request(path, method: "POST", body: request)
+        // FIX: Use URLComponents instead of string concatenation
+        // OLD: let path = "\(APIPath.calendarEvents)?user_id=\(userId.uuidString)"
+        guard var components = URLComponents(url: Constants.apiBaseURL.appendingPathComponent(APIPath.calendarEvents), resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [URLQueryItem(name: "user_id", value: userId.uuidString)]
+        
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = KeychainService.shared.getAccessToken() {
+            urlRequest.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        urlRequest.httpBody = try encoder.encode(request)
+        
+        let (data, _) = try await URLSession.shared.data(for: urlRequest)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(CalendarEventPayload.self, from: data)
     }
 
     func syncCalendar(context: NSManagedObjectContext, maxResults: Int = 10) async throws {

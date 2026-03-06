@@ -16,7 +16,7 @@ struct CalendarEventDetailView: View {
                     Label(event.endDate.formattedDate(), systemImage: "clock.badge.checkmark")
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppColor.textSecondary)
 
                 if let location = event.location, !location.isEmpty {
                     Label(location, systemImage: "mappin.and.ellipse")

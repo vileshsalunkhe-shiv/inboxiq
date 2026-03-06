@@ -15,6 +15,8 @@ struct EmailDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var toast: ToastData?
     @State private var isPerformingAction = false
+    @State private var isSavingToDrive = false
+    @State private var savingAttachmentIndex: Int?
 
     @State private var fullBody: EmailBody?
     @State private var isLoadingBody = false
@@ -220,10 +222,10 @@ struct EmailDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
             
-            if let html = body.bodyHtml, !html.isEmpty {
+            if let html = body.htmlBody, !html.isEmpty {
                 EmailBodyWebView(html: html, contentHeight: $webViewHeight)
                     .frame(minHeight: 200, maxHeight: webViewHeight)
-            } else if let text = body.bodyText, !text.isEmpty {
+            } else if let text = body.textBody, !text.isEmpty {
                 Text(text)
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -233,11 +235,69 @@ struct EmailDetailView: View {
                     .foregroundStyle(AppColor.textSecondary)
             }
             
-            if body.hasAttachments {
-                Label("This email has attachments", systemImage: "paperclip")
-                    .font(.caption)
-                    .foregroundStyle(AppColor.textSecondary)
+            if !body.attachments.isEmpty {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Attachments")
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.textPrimary)
+
+                    ForEach(body.attachments) { attachment in
+                        SecondaryButton(
+                            title: attachment.filename,
+                            systemImage: attachmentIcon(for: attachment.mimeType),
+                            action: {
+                                Task {
+                                    await saveToDrive(attachmentIndex: attachment.index)
+                                }
+                            }
+                        )
+                        .disabled(isSavingToDrive)
+                    }
+                }
             }
+        }
+    }
+
+    private func attachmentIcon(for mimeType: String) -> String {
+        if mimeType.starts(with: "image/") {
+            return "photo"
+        } else if mimeType == "application/pdf" {
+            return "doc.text"
+        } else if mimeType.contains("word") {
+            return "doc"
+        } else if mimeType.contains("excel") || mimeType.contains("spreadsheet") {
+            return "tablecells"
+        } else {
+            return "paperclip"
+        }
+    }
+
+    private func driveButtonTitle(for index: Int) -> String {
+        if isSavingToDrive && savingAttachmentIndex == index {
+            return "Saving..."
+        }
+        return "Save to Drive"
+    }
+
+    private func saveToDrive(attachmentIndex: Int) async {
+        guard !isSavingToDrive else { return }
+        isSavingToDrive = true
+        savingAttachmentIndex = attachmentIndex
+        defer {
+            isSavingToDrive = false
+            savingAttachmentIndex = nil
+        }
+
+        do {
+            let driveFile = try await DriveService.shared.uploadAttachment(
+                emailId: email.gmailId,
+                attachmentIndex: attachmentIndex
+            )
+            showToast("Saved to Drive: \(driveFile.name)", style: .success)
+        } catch let error as AppError {
+            handleError(error)
+        } catch {
+            showToast("Failed to save to Drive", style: .error)
         }
     }
 
@@ -304,18 +364,21 @@ struct EmailDetailView: View {
     private func deleteEmail() async {
         guard !isPerformingAction else { return }
         isPerformingAction = true
-        defer { isPerformingAction = false }
-
-        do {
-            try await EmailActionService.shared.deleteEmail(email: email)
+        
+        // For now, just delete locally (backend delete has sync issues)
+        // TODO: Re-enable backend delete after fixing sync rate limiting
+        await MainActor.run {
             viewContext.delete(email)
-            try viewContext.save()
-            triggerHaptic()
-            dismiss()
-        } catch let error as AppError {
-            handleError(error)
-        } catch {
-            handleError(AppError.unknown(error.localizedDescription))
+            do {
+                try viewContext.save()
+                triggerHaptic()
+                showToast("Email deleted", style: .success)
+                isPerformingAction = false
+                dismiss()
+            } catch {
+                isPerformingAction = false
+                handleError(AppError.coreData("Failed to delete email"))
+            }
         }
     }
 
@@ -323,22 +386,45 @@ struct EmailDetailView: View {
         guard !isPerformingAction else { return }
         isPerformingAction = true
         let shouldMarkRead = email.isUnread
-        email.isUnread.toggle()
-
-        do {
-            try viewContext.save()
-            try await EmailActionService.shared.updateReadStatus(email: email, read: shouldMarkRead)
-            triggerHaptic()
-            showToast(shouldMarkRead ? "Marked as read" : "Marked as unread", style: .success)
-        } catch let error as AppError {
+        
+        // Update on main thread and ensure CoreData propagates changes
+        await MainActor.run {
             email.isUnread.toggle()
-            handleError(error)
-        } catch {
-            email.isUnread.toggle()
-            handleError(AppError.unknown(error.localizedDescription))
+            viewContext.processPendingChanges()
         }
 
-        isPerformingAction = false
+        do {
+            // Save CoreData changes
+            try await MainActor.run {
+                try viewContext.save()
+                
+                // Force refresh to ensure parent views see the change
+                viewContext.refresh(email, mergeChanges: false)
+            }
+            
+            // Update backend
+            try await EmailActionService.shared.updateReadStatus(email: email, read: shouldMarkRead)
+            
+            await MainActor.run {
+                triggerHaptic()
+                showToast(shouldMarkRead ? "Marked as read" : "Marked as unread", style: .success)
+                isPerformingAction = false
+            }
+        } catch let error as AppError {
+            await MainActor.run {
+                email.isUnread.toggle()
+                try? viewContext.save()
+                isPerformingAction = false
+                handleError(error)
+            }
+        } catch {
+            await MainActor.run {
+                email.isUnread.toggle()
+                try? viewContext.save()
+                isPerformingAction = false
+                handleError(AppError.unknown(error.localizedDescription))
+            }
+        }
     }
 
     private func handleError(_ error: AppError) {

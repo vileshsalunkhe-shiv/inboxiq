@@ -10,7 +10,7 @@ struct CalendarConnectionView: View {
             Spacer()
             Image(systemName: "calendar.badge.plus")
                 .font(.system(size: 64))
-                .foregroundStyle(.inboxBlue)
+                .foregroundStyle(AppColor.primary)
                 .accessibilityHidden(true)
 
             Text("Connect Google Calendar")
@@ -19,7 +19,7 @@ struct CalendarConnectionView: View {
 
             Text("Link your calendar to see upcoming events and create new ones.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppColor.textSecondary)
 
             Button {
                 Task { await calendarAuthViewModel.startAuth(context: viewContext) }
@@ -31,7 +31,7 @@ struct CalendarConnectionView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.inboxBlue)
+                .background(AppColor.primary)
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }

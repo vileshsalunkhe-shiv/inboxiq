@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import List, Optional
+
 from pydantic import BaseModel
 
 
@@ -22,14 +24,24 @@ class EmailOut(BaseModel):
     ai_confidence: float | None = None
 
 
-class EmailBodyOut(BaseModel):
-    """Full email body response."""
+class AttachmentMetadata(BaseModel):
+    """Metadata for email attachment."""
 
-    email_id: str
-    body_text: str | None = None
-    body_html: str | None = None
-    has_attachments: bool
-    fetched_at: datetime | None = None
+    index: int
+    filename: str
+    mime_type: str
+    size: int
+
+
+class EmailBodyOut(BaseModel):
+    """Email body response with attachment metadata."""
+
+    message_id: str
+    html_body: Optional[str] = None
+    text_body: Optional[str] = None
+    has_attachments: bool = False
+    attachments: List[AttachmentMetadata] = []
+    fetched_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

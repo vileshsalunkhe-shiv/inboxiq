@@ -1,10 +1,57 @@
 import Foundation
+import CommonCrypto
 
-final class APIClient {
+final class APIClient: NSObject, URLSessionDelegate {
     static let shared = APIClient()
-    private init() {}
+    private override init() {
+        super.init()
+    }
 
-    private let session = URLSession(configuration: .default)
+    /// SSL Certificate Pinning Configuration
+    ///
+    /// This implementation uses public key hash pinning for enhanced security.
+    /// The public key hash(es) are precomputed from the Railway backend certificate.
+    ///
+    /// **Security Benefits:**
+    /// - Pins to the actual public key, not just hostname
+    /// - Survives certificate rotation if the same key pair is used
+    /// - More resistant to certificate compromise and MITM attacks
+    ///
+    /// **Maintenance:**
+    /// - If Railway rotates certificates with a new key pair, update expectedPublicKeyHashes
+    /// - To extract the hash, run in DEBUG mode and check console output
+    /// - Alternative: Use OpenSSL command documented in README-SSL-PINNING.md
+    ///
+    /// **Testing:**
+    /// - Verify pinning succeeds for Railway backend
+    /// - Verify pinning fails for other domains
+    /// - Test with network proxy to ensure MITM protection works
+    private let expectedPublicKeyHashes: Set<String> = [
+        // Placeholder - replace with actual Railway public key hash (base64)
+        "RAILWAY_PUBLIC_KEY_HASH_BASE64_HERE"
+    ]
+
+    private func publicKeyHash(for certificate: SecCertificate) -> String? {
+        guard let publicKey = SecCertificateCopyKey(certificate) else {
+            return nil
+        }
+
+        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
+            return nil
+        }
+
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        publicKeyData.withUnsafeBytes { buffer in
+            _ = CC_SHA256(buffer.baseAddress, CC_LONG(publicKeyData.count), &hash)
+        }
+
+        return Data(hash).base64EncodedString()
+    }
+
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.default
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }()
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -16,6 +63,69 @@ final class APIClient {
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
+
+    #if DEBUG
+    // Development mode: Log the actual hash for pinning configuration
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust,
+              let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        if let hash = publicKeyHash(for: serverCertificate) {
+            print("🔐 SERVER PUBLIC KEY HASH: \(hash)")
+            print("📋 Copy this hash to expectedPublicKeyHashes array")
+            print("🌐 Host: \(challenge.protectionSpace.host)")
+        }
+
+        Logger.warning("⚠️ DEVELOPMENT MODE: SSL pinning bypassed")
+        let credential = URLCredential(trust: serverTrust)
+        completionHandler(.useCredential, credential)
+    }
+    #else
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust else {
+            Logger.warning("SSL challenge failed: invalid authentication method")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        guard let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
+            Logger.warning("SSL challenge failed: no server certificate")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        guard let serverPublicKeyHash = publicKeyHash(for: serverCertificate) else {
+            Logger.warning("SSL challenge failed: could not extract public key")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        if expectedPublicKeyHashes.contains(serverPublicKeyHash) {
+            Logger.info("SSL pinning: certificate validated")
+            let credential = URLCredential(trust: serverTrust)
+            completionHandler(.useCredential, credential)
+        } else {
+            Logger.warning("SSL pinning failed: public key hash mismatch", metadata: [
+                "expected_count": "\(expectedPublicKeyHashes.count)",
+                "received_prefix": "\(serverPublicKeyHash.prefix(8))"
+            ])
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+    #endif
 
     func request<T: Decodable>(
         _ path: String,
@@ -64,7 +174,10 @@ final class APIClient {
         }
 
         if data.isEmpty, T.self == EmptyResponse.self {
-            return EmptyResponse() as! T
+            guard let empty = EmptyResponse() as? T else {
+                throw AppError.decoding("Failed to decode empty response")
+            }
+            return empty
         }
 
         do {

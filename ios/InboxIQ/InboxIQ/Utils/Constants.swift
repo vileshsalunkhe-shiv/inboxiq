@@ -3,7 +3,7 @@ import Foundation
 enum Constants {
     static let appName = "InboxIQ"
     static let apiBaseURL = URL(string: "https://inboxiq-production-5368.up.railway.app")!
-    
+    //static let apiBaseURL = URL(string: "http://localhost:8000")!
     // OAuth - Backend handles the flow
     static let oauthCallbackScheme = "inboxiq"  // iOS app scheme for receiving tokens
     static let oauthClientId = "535816296321-a722g108h5cqt6ai2v1c7jma0200ij36.apps.googleusercontent.com"  // Web client

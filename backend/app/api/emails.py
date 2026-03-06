@@ -15,7 +15,7 @@ import structlog
 from app.api.deps import get_current_user
 from app.database import get_db
 from app.models import AIQueue, Email, User
-from app.schemas.email import EmailBodyOut, EmailList, EmailOut
+from app.schemas.email import AttachmentMetadata, EmailBodyOut, EmailList, EmailOut
 from app.schemas.email_actions import (
     BulkActionRequest,
     BulkActionResponse,
@@ -263,10 +263,11 @@ async def get_email_body(
             cached_at=email.body_fetched_at.isoformat() if email.body_fetched_at else None,
         )
         return EmailBodyOut(
-            email_id=str(email.id),
-            body_text=email.body_text,
-            body_html=email.body_html,
+            message_id=email.gmail_id,
+            html_body=email.body_html,
+            text_body=email.body_text,
             has_attachments=bool(email.has_attachments),
+            attachments=[],
             fetched_at=email.body_fetched_at,
         )
 
@@ -300,6 +301,18 @@ async def get_email_body(
             detail="Failed to fetch email body from Gmail",
         )
 
+    attachments_metadata: list[AttachmentMetadata] = []
+    for idx, part in enumerate(body_data.get("parts", []) or []):
+        if part.get("filename"):
+            attachments_metadata.append(
+                AttachmentMetadata(
+                    index=idx,
+                    filename=part["filename"],
+                    mime_type=part.get("mimeType", "application/octet-stream"),
+                    size=part.get("body", {}).get("size", 0),
+                )
+            )
+
     email.body_text = body_data.get("text")
     email.body_html = body_data.get("html")
     email.has_attachments = body_data.get("has_attachments", False)
@@ -307,10 +320,11 @@ async def get_email_body(
     await db.commit()
 
     return EmailBodyOut(
-        email_id=str(email.id),
-        body_text=email.body_text,
-        body_html=email.body_html,
+        message_id=email.gmail_id,
+        html_body=email.body_html,
+        text_body=email.body_text,
         has_attachments=bool(email.has_attachments),
+        attachments=attachments_metadata,
         fetched_at=email.body_fetched_at,
     )
 

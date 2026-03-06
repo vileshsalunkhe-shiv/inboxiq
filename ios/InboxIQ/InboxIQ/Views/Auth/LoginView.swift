@@ -9,7 +9,7 @@ struct LoginView: View {
             Spacer()
             Image(systemName: "tray.full")
                 .font(.system(size: 64))
-                .foregroundStyle(.inboxBlue)
+                .foregroundStyle(AppColor.primary)
                 .accessibilityHidden(true)
 
             Text("Welcome to InboxIQ")
@@ -18,7 +18,7 @@ struct LoginView: View {
 
             Text("Organize your Gmail with intelligent categories.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppColor.textSecondary)
 
             Button {
                 showOAuth = true
@@ -30,9 +30,9 @@ struct LoginView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.inboxBlue)
+                .background(AppColor.primary)
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: AppSpacing.cornerRadiusMd))
             }
             .accessibilityLabel("Sign in with Google")
 

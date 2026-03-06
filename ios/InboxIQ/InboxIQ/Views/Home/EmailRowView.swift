@@ -2,6 +2,8 @@ import SwiftUI
 
 struct EmailRowView: View {
     let email: EmailEntity
+    var isStarred: Bool = false
+    var isLoading: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -10,37 +12,71 @@ struct EmailRowView: View {
                 .frame(width: 10, height: 10)
                 .padding(.top, 6)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(email.sender)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColor.textSecondary)
                     Spacer()
                     Text(email.receivedAt.relativeDescription())
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColor.textSecondary)
                 }
 
-                Text(email.subject)
-                    .fontWeight(email.isUnread ? .bold : .regular)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(email.subject)
+                        .fontWeight(email.isUnread ? .bold : .regular)
+                        .lineLimit(1)
+                    Spacer()
+                    if isStarred {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(AppColor.accent)
+                            .font(.caption)
+                            .accessibilityLabel("Starred")
+                    }
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
+                }
+
+                if let summary = email.aiSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.footnote)
+                        .foregroundStyle(AppColor.textSecondary)
+                        .lineLimit(2)
+                }
 
                 Text(email.snippet)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppColor.textSecondary)
                     .lineLimit(2)
 
                 if let category = email.category {
-                    Text("\(category.icon) \(category.name)")
-                        .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.fromHex(category.color).opacity(0.15))
-                        .clipShape(Capsule())
-                        .accessibilityLabel("Category \(category.name)")
+                    CategoryBadge(
+                        name: category.name,
+                        icon: categoryIcon,
+                        color: categoryColor
+                    )
+                    .accessibilityLabel(Text("\(category.name) email"))
                 }
             }
         }
         .padding(.vertical, 6)
+    }
+
+    private var categoryDefinition: CategoryDefinition? {
+        guard let category = email.category else { return nil }
+        return CategoryColors.definition(for: category.name)
+    }
+
+    private var categoryColor: Color {
+        guard let category = email.category else { return .clear }
+        return Color.fromHex(categoryDefinition?.colorHex ?? category.color)
+    }
+
+    private var categoryIcon: String {
+        guard let category = email.category else { return "tag.fill" }
+        return categoryDefinition?.symbol ?? category.icon
     }
 }

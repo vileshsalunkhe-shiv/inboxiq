@@ -33,7 +33,7 @@ struct CategoryFilterView: View {
                 .font(.subheadline)
                 .padding(.vertical, 6)
                 .padding(.horizontal, 12)
-                .background(isSelected ? Color.inboxBlue : Color(.systemBackground))
+                .background(isSelected ? AppColor.primary : AppColor.backgroundPrimary)
                 .foregroundStyle(isSelected ? .white : .primary)
                 .clipShape(Capsule())
                 .overlay(

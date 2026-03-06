@@ -29,6 +29,17 @@ except Exception as e:
     import logging
     logging.error(f"Unexpected error importing calendar router: {e}", exc_info=True)
 
+# Try to import drive router, but don't fail if it's missing
+drive_router = None
+try:
+    from app.api.drive import router as drive_router
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import drive router: {e}", exc_info=True)
+except Exception as e:
+    import logging
+    logging.error(f"Unexpected error importing drive router: {e}", exc_info=True)
+
 from app.config import settings
 from app.database import engine
 from app.utils.logger import setup_logging
@@ -72,6 +83,12 @@ def create_app() -> FastAPI:
         logger.info("Calendar router loaded successfully")
     else:
         logger.warning("Calendar router not available - calendar endpoints disabled")
+    
+    if drive_router:
+        app.include_router(drive_router)
+        logger.info("Drive router loaded successfully")
+    else:
+        logger.warning("Drive router not available - drive endpoints disabled")
 
     @app.on_event("startup")
     async def startup() -> None:
