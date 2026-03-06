@@ -7,7 +7,12 @@ enum Constants {
     // OAuth - Backend handles the flow
     static let oauthCallbackScheme = "inboxiq"  // iOS app scheme for receiving tokens
     static let oauthClientId = "535816296321-a722g108h5cqt6ai2v1c7jma0200ij36.apps.googleusercontent.com"  // Web client
-    static let oauthScopes = ["https://www.googleapis.com/auth/gmail.modify", "openid", "email"]
+    static let oauthScopes = [
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/drive.file",
+        "openid",
+        "email"
+    ]
     static let oauthAuthorizeURL = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
     static let oauthBackendCallbackURL = "\(apiBaseURL.absoluteString)/auth/ios/callback"  // Backend receives Google callback
     
