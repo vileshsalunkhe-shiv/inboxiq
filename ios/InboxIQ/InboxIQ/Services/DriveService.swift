@@ -15,12 +15,20 @@ final class DriveService {
     }
 
     func listFiles(limit: Int = 30) async throws -> [DriveFile] {
-        let response: DriveFileListResponse = try await APIClient.shared.request(
-            "/drive/files?limit=\(limit)"
-        )
+        // Build URL with query parameters using URLComponents to avoid encoding issues
+        var components = URLComponents(string: "/drive/files")!
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        
+        let endpoint = components.url?.absoluteString ?? "/drive/files"
+        let response: DriveFileListResponse = try await APIClient.shared.request(endpoint)
         return response.files.map { DriveFile(from: $0) }
     }
 
+    // Download URL endpoint removed from backend for security (Sundar review)
+    // Files can be opened directly in Google Drive app via webViewLink
+    /*
     func getDownloadUrl(fileId: String) async throws -> URL {
         let response: DriveDownloadUrlResponse = try await APIClient.shared.request(
             "/drive/files/\(fileId)/download-url"
@@ -32,4 +40,5 @@ final class DriveService {
 
         return url
     }
+    */
 }
