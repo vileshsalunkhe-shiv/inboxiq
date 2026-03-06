@@ -246,3 +246,24 @@ async def get_drive_file(
 
 
 # Download URL endpoint removed (security: no permanent URLs)
+
+
+@router.get("/debug/token-scopes")
+async def debug_token_scopes(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Debug endpoint to check what scopes the current token has."""
+    import httpx
+    from app.services.auth_service import AuthService
+    
+    auth_service = AuthService(db)
+    access_token = await auth_service.get_google_access_token(current_user)
+    
+    # Check token scopes with Google
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.googleapis.com/oauth2/v1/tokeninfo",
+            params={"access_token": access_token}
+        )
+        return response.json()
