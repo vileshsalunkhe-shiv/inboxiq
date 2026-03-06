@@ -85,7 +85,7 @@ def create_app() -> FastAPI:
         logger.warning("Calendar router not available - calendar endpoints disabled")
     
     if drive_router:
-        app.include_router(drive_router)
+        app.include_router(drive_router, prefix="/api")
         logger.info("Drive router loaded successfully")
     else:
         logger.warning("Drive router not available - drive endpoints disabled")
