@@ -27,6 +27,7 @@ GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",  # Allows read, send, modify, and delete
+    "https://www.googleapis.com/auth/drive.file",  # Access files created by this app only
     "openid",
     "email",
 ]
