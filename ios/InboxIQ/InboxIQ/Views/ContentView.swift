@@ -23,6 +23,11 @@ struct ContentView: View {
                     .tabItem {
                         Label("Calendar", systemImage: "calendar")
                     }
+                    
+                    DriveListView()
+                        .tabItem {
+                            Label("Drive", systemImage: "folder")
+                        }
 
                     SettingsView()
                         .tabItem {
