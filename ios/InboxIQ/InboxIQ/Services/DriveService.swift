@@ -7,7 +7,7 @@ final class DriveService {
 
     func uploadAttachment(emailId: String, attachmentIndex: Int) async throws -> DriveFile {
         let response: DriveUploadResponse = try await APIClient.shared.request(
-            "/drive/upload",
+            "/api/drive/upload",
             method: "POST",
             body: DriveUploadRequest(emailId: emailId, attachmentIndex: attachmentIndex)
         )
@@ -17,7 +17,7 @@ final class DriveService {
     func listFiles(limit: Int = 30) async throws -> [DriveFile] {
         // APIClient now properly handles query parameters without encoding them
         let response: DriveFileListResponse = try await APIClient.shared.request(
-            "/drive/files?limit=\(limit)"
+            "/api/drive/files?limit=\(limit)"
         )
         return response.files.map { DriveFile(from: $0) }
     }
