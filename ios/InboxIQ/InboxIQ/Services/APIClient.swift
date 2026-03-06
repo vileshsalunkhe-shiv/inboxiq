@@ -141,7 +141,14 @@ final class APIClient: NSObject, URLSessionDelegate {
         body: Encodable? = nil,
         allowRefresh: Bool
     ) async throws -> T {
-        var request = URLRequest(url: Constants.apiBaseURL.appendingPathComponent(path))
+        // Build URL properly to avoid encoding query parameters
+        // appendingPathComponent encodes ? and & which breaks query strings
+        let fullURLString = Constants.apiBaseURL.absoluteString + path
+        guard let url = URL(string: fullURLString) else {
+            throw AppError.network("Invalid URL: \(path)")
+        }
+        
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 

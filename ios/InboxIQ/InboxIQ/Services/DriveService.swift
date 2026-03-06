@@ -15,14 +15,10 @@ final class DriveService {
     }
 
     func listFiles(limit: Int = 30) async throws -> [DriveFile] {
-        // Build URL with query parameters using URLComponents to avoid encoding issues
-        var components = URLComponents(string: "/drive/files")!
-        components.queryItems = [
-            URLQueryItem(name: "limit", value: "\(limit)")
-        ]
-        
-        let endpoint = components.url?.absoluteString ?? "/drive/files"
-        let response: DriveFileListResponse = try await APIClient.shared.request(endpoint)
+        // APIClient now properly handles query parameters without encoding them
+        let response: DriveFileListResponse = try await APIClient.shared.request(
+            "/drive/files?limit=\(limit)"
+        )
         return response.files.map { DriveFile(from: $0) }
     }
 
